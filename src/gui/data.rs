@@ -63,10 +63,7 @@ pub(crate) fn save_capture(cap: &ScrimCapture, dir: &Path, name: &str) -> Result
 
 /// Recomputes a report from a saved capture (same logic as `--recalc`).
 pub(crate) fn load_capture(path: &str) -> Result<LoadedCapture, String> {
-    let raw =
-        std::fs::read_to_string(path).map_err(|e| format!("could not read {path}: {e}"))?;
-    let v: serde_json::Value = serde_json::from_str(&raw)
-        .map_err(|e| format!("invalid JSON in {path}: {e}"))?;
+    let (raw, v) = read_capture_json(path)?;
     let null = serde_json::Value::Null;
     let mut blocks: Vec<ScrimBlock> = serde_json::from_value(
         v.get("blocks").cloned().unwrap_or(null.clone()),
@@ -111,23 +108,7 @@ pub(crate) fn load_capture(path: &str) -> Result<LoadedCapture, String> {
     rebuild_event_counters(&mut blocks, &deduped);
 
     // Feed vs scoreboard reconciliation (only if the capture includes players).
-    let mut feed = (0u32, 0u32);
-    for e in &deduped {
-        if e.kind == "ChampionKill" {
-            match e.team {
-                Some(Team::Blue) => feed.0 += 1,
-                Some(Team::Red) => feed.1 += 1,
-                None => {}
-            }
-        }
-    }
-    let mut marcador = (0u32, 0u32);
-    for p in &players {
-        match p.team {
-            Team::Blue => marcador.0 += p.kills,
-            Team::Red => marcador.1 += p.kills,
-        }
-    }
+    let (feed, marcador) = feed_vs_scoreboard(&deduped, &players);
     if marcador.0 > feed.0 || marcador.1 > feed.1 {
         notes.push(i18n::trf(
             "El feed omitió kills: el marcador mide {0}–{1} y el feed aporta {2}–{3}; esas ventanas no las cuentan.",
@@ -140,27 +121,7 @@ pub(crate) fn load_capture(path: &str) -> Result<LoadedCapture, String> {
         ));
     }
 
-    // If the capture already came enriched with the LCU, its real-gold report is kept
-    // (recomputing with the points model would destroy the axes and the
-    // Top 5). Old captures are recomputed as usual.
-    let saved_dominion: Option<DominionReport> = v
-        .get("dominion")
-        .cloned()
-        .and_then(|d| serde_json::from_value(d).ok());
-    let report = match saved_dominion {
-        Some(r) if r.fuente.contains("lcu") => {
-            notes.push(i18n::tr(
-                "Informe de oro real recuperado del JSON (sin recalcular).",
-            ));
-            r
-        }
-        _ => score::compute_report(
-            &blocks,
-            ScoreParams::default(),
-            VisionThresholds::default(),
-            "captura_guardada",
-        ),
-    };
+    let report = saved_or_computed_report(&v, &blocks, &mut notes);
     if let Some(id) = game_id {
         notes.push(i18n::trf("gameId de la captura: {0}", &[&id.to_string()]));
     }
@@ -174,6 +135,68 @@ pub(crate) fn load_capture(path: &str) -> Result<LoadedCapture, String> {
         notes,
         game_id,
     })
+}
+
+/// Reads the JSON of a capture from disk.
+fn read_capture_json(path: &str) -> Result<(String, serde_json::Value), String> {
+    let raw =
+        std::fs::read_to_string(path).map_err(|e| format!("could not read {path}: {e}"))?;
+    let v: serde_json::Value = serde_json::from_str(&raw)
+        .map_err(|e| format!("invalid JSON in {path}: {e}"))?;
+    Ok((raw, v))
+}
+
+/// Kills in the event feed and in the scoreboard, as `(blue, red)` each.
+fn feed_vs_scoreboard(
+    events: &[AttributedEvent],
+    players: &[PlayerSample],
+) -> ((u32, u32), (u32, u32)) {
+    let mut feed = (0u32, 0u32);
+    for e in events {
+        if e.kind == "ChampionKill" {
+            match e.team {
+                Some(Team::Blue) => feed.0 += 1,
+                Some(Team::Red) => feed.1 += 1,
+                None => {}
+            }
+        }
+    }
+    let mut marcador = (0u32, 0u32);
+    for p in players {
+        match p.team {
+            Team::Blue => marcador.0 += p.kills,
+            Team::Red => marcador.1 += p.kills,
+        }
+    }
+    (feed, marcador)
+}
+
+/// If the capture already came enriched with the LCU, its real-gold report is
+/// kept (recomputing with the points model would destroy the axes and the
+/// Top 5). Old captures are recomputed as usual.
+fn saved_or_computed_report(
+    v: &serde_json::Value,
+    blocks: &[ScrimBlock],
+    notes: &mut Vec<String>,
+) -> DominionReport {
+    let saved_dominion: Option<DominionReport> = v
+        .get("dominion")
+        .cloned()
+        .and_then(|d| serde_json::from_value(d).ok());
+    match saved_dominion {
+        Some(r) if r.fuente.contains("lcu") => {
+            notes.push(i18n::tr(
+                "Informe de oro real recuperado del JSON (sin recalcular).",
+            ));
+            r
+        }
+        _ => score::compute_report(
+            blocks,
+            ScoreParams::default(),
+            VisionThresholds::default(),
+            "captura_guardada",
+        ),
+    }
 }
 
 pub(crate) fn kill_density(replay: &Replay) -> Vec<(u32, u32, u32)> {

@@ -588,14 +588,6 @@ pub(crate) fn severity_legend(
     vt: &VisionThresholds,
     es_oro: bool,
 ) {
-    let st = &params.thresholds;
-    let intervalo = |a: f64, b: f64| -> String {
-        if es_oro {
-            format!("[{a:.0}g, {b:.0}g)")
-        } else {
-            format!("[{a:.1}, {b:.1}) pts")
-        }
-    };
     egui::Frame::default()
         .fill(PANEL)
         .inner_margin(egui::Margin::same(14))
@@ -618,89 +610,119 @@ pub(crate) fn severity_legend(
                 .color(MUTED),
             );
             ui.add_space(10.0);
-            let rows: [(Severity, String, Option<f64>); 4] = [
-                (
-                    Severity::VentajaMinima,
-                    intervalo(st.semi_alerta, st.ventaja_media),
-                    Some(vt.semi_alerta),
-                ),
-                (
-                    Severity::VentajaMedia,
-                    intervalo(st.ventaja_media, st.ventaja_considerable),
-                    Some(vt.ventaja_media),
-                ),
-                (
-                    Severity::VentajaConsiderable,
-                    intervalo(st.ventaja_considerable, st.ventaja_critica),
-                    Some(vt.ventaja_considerable),
-                ),
-                (
-                    Severity::VentajaCritica,
-                    if es_oro {
-                        format!("≥ {:.0}g", st.ventaja_critica)
-                    } else {
-                        format!("≥ {:.1} pts", st.ventaja_critica)
-                    },
-                    Some(vt.ventaja_critica),
-                ),
-            ];
+            let rows = severity_rows(params, vt, es_oro);
             ui.columns(4, |cols| {
                 for ((sev, intervalo, vis_min), col) in rows.iter().zip(cols.iter_mut()) {
-                    let c = severity_color(*sev);
-                    egui::Frame::default()
-                        .fill(PANEL2)
-                        .inner_margin(egui::Margin::same(10))
-                        .corner_radius(egui::CornerRadius::same(8))
-                        .stroke(egui::Stroke::new(1.0, c.linear_multiply(0.6)))
-                        .show(col, |ui| {
-                            let w = ui.available_width();
-                            ui.set_min_width(w);
-                            ui.label(
-                                RichText::new(format!("●  {}", severity_label(*sev)))
-                                    .size(15.0)
-                                    .strong()
-                                    .color(c),
-                            );
-                            ui.label(
-                                RichText::new(match vis_min {
-                                    Some(v) => i18n::trf(
-                                        "{0}   ·   Visión ≥{1}",
-                                        &[&intervalo, &format!("{v:.2}")],
-                                    ),
-                                    None => i18n::trf(
-                                        "{0}   ·   Visión —",
-                                        &[&intervalo],
-                                    ),
-                                })
-                                .size(13.0)
-                                .color(ACCENT_SOFT),
-                            );
-                        });
+                    severity_card(col, *sev, intervalo, *vis_min);
                 }
             });
             ui.add_space(10.0);
+            severity_footer(ui, params, es_oro);
+        });
+}
+
+/// Gold/score interval of a severity level, with the right units.
+fn severity_interval(a: f64, b: f64, es_oro: bool) -> String {
+    if es_oro {
+        format!("[{a:.0}g, {b:.0}g)")
+    } else {
+        format!("[{a:.1}, {b:.1}) pts")
+    }
+}
+
+/// One row per severity level: interval and minimum vision activity.
+fn severity_rows(
+    params: &ScoreParams,
+    vt: &VisionThresholds,
+    es_oro: bool,
+) -> [(Severity, String, Option<f64>); 4] {
+    let st = &params.thresholds;
+    [
+        (
+            Severity::VentajaMinima,
+            severity_interval(st.semi_alerta, st.ventaja_media, es_oro),
+            Some(vt.semi_alerta),
+        ),
+        (
+            Severity::VentajaMedia,
+            severity_interval(st.ventaja_media, st.ventaja_considerable, es_oro),
+            Some(vt.ventaja_media),
+        ),
+        (
+            Severity::VentajaConsiderable,
+            severity_interval(st.ventaja_considerable, st.ventaja_critica, es_oro),
+            Some(vt.ventaja_considerable),
+        ),
+        (
+            Severity::VentajaCritica,
+            if es_oro {
+                format!("≥ {:.0}g", st.ventaja_critica)
+            } else {
+                format!("≥ {:.1} pts", st.ventaja_critica)
+            },
+            Some(vt.ventaja_critica),
+        ),
+    ]
+}
+
+/// Card of one severity level.
+fn severity_card(col: &mut egui::Ui, sev: Severity, intervalo: &str, vis_min: Option<f64>) {
+    let c = severity_color(sev);
+    egui::Frame::default()
+        .fill(PANEL2)
+        .inner_margin(egui::Margin::same(10))
+        .corner_radius(egui::CornerRadius::same(8))
+        .stroke(egui::Stroke::new(1.0, c.linear_multiply(0.6)))
+        .show(col, |ui| {
+            let w = ui.available_width();
+            ui.set_min_width(w);
             ui.label(
-                RichText::new(if es_oro {
-                    i18n::tr("El desglose de cada alerta (kills, CS, torres y objetivos) suma el 100 % del oro neto de la ventana; las placas no detectadas van a «Oro extra».")
-                } else {
-                    i18n::trf(
-                        "Puntos por acción: kill {0} · torre {1} · placa {2} · dragón {3} (buff {4}) · heraldo {5} (buff {6}) · barón {7} (buff {8}) · CS {9}   |   los buffs NO suman al score: se informan aparte",
-                        &[
-                            &format!("{:.1}", params.kills),
-                            &format!("{:.1}", params.tower),
-                            &format!("{:.1}", params.plate),
-                            &format!("{:.1}", params.dragon),
-                            &mmss(params.dragon_buff_dur_s),
-                            &format!("{:.1}", params.herald),
-                            &mmss(params.herald_buff_dur_s),
-                            &format!("{:.1}", params.baron),
-                            &mmss(params.baron_buff_dur_s),
-                            &format!("{:.2}", params.cs),
-                        ],
-                    )
+                RichText::new(format!("●  {}", severity_label(sev)))
+                    .size(15.0)
+                    .strong()
+                    .color(c),
+            );
+            ui.label(
+                RichText::new(match vis_min {
+                    Some(v) => i18n::trf(
+                        "{0}   ·   Visión ≥{1}",
+                        &[&intervalo, &format!("{v:.2}")],
+                    ),
+                    None => i18n::trf(
+                        "{0}   ·   Visión —",
+                        &[&intervalo],
+                    ),
                 })
-                .size(12.5)
-                .color(MUTED),
+                .size(13.0)
+                .color(ACCENT_SOFT),
             );
         });
+}
+
+/// Note under the cards: what the breakdown includes (gold) or what each
+/// action is worth (points).
+fn severity_footer(ui: &mut egui::Ui, params: &ScoreParams, es_oro: bool) {
+    ui.label(
+        RichText::new(if es_oro {
+            i18n::tr("El desglose de cada alerta (kills, CS, torres y objetivos) suma el 100 % del oro neto de la ventana; las placas no detectadas van a «Oro extra».")
+        } else {
+            i18n::trf(
+                "Puntos por acción: kill {0} · torre {1} · placa {2} · dragón {3} (buff {4}) · heraldo {5} (buff {6}) · barón {7} (buff {8}) · CS {9}   |   los buffs NO suman al score: se informan aparte",
+                &[
+                    &format!("{:.1}", params.kills),
+                    &format!("{:.1}", params.tower),
+                    &format!("{:.1}", params.plate),
+                    &format!("{:.1}", params.dragon),
+                    &mmss(params.dragon_buff_dur_s),
+                    &format!("{:.1}", params.herald),
+                    &mmss(params.herald_buff_dur_s),
+                    &format!("{:.1}", params.baron),
+                    &mmss(params.baron_buff_dur_s),
+                    &format!("{:.2}", params.cs),
+                ],
+            )
+        })
+        .size(12.5)
+        .color(MUTED),
+    );
 }
