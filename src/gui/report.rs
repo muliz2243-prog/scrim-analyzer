@@ -196,89 +196,9 @@ pub(crate) fn ui_report(
 ) {
     // LCU-enriched source: the values of `score_net_blue` are **gold**.
     let es_oro = r.report.fuente.contains("lcu");
-    ui.add_space(8.0);
-    if let Some(revision) = &r.revision {
-        if !revision.is_empty() {
-            ui.label(
-                RichText::new(revision)
-                    .family(strong_family())
-                    .size(21.0)
-                    .strong()
-                    .color(GOLD_BRIGHT),
-            );
-            ui.add_space(2.0);
-        }
-    }
-    // Serif headline with a gold halo ("infographic" style from the reference).
-    egui::Frame::default()
-        .inner_margin(egui::Margin::same(0))
-        .shadow(egui::Shadow {
-            offset: [0, 2],
-            blur: 16,
-            spread: 3,
-            color: GOLD.linear_multiply(0.30),
-        })
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(i18n::tr(&r.title))
-                    .family(display_family())
-                    .size(34.0)
-                    .strong()
-                    .color(GOLD_BRIGHT),
-            );
-        });
-    ui.label(RichText::new(r.subtitle.clone()).size(14.5).color(MUTED));
-    for n in &r.notes {
-        ui.label(RichText::new(format!("• {n}")).size(13.5).color(ACCENT_SOFT));
-    }
+    report_header(ui, r);
 
-    // Save the capture log.
-    if let Some(json) = r.json.clone() {
-        ui.add_space(10.0);
-        ui.horizontal(|ui| {
-            // With automatic saving enabled, the manual button would be redundant.
-            if *auto_json {
-                ui.label(
-                    RichText::new(i18n::tr("💾  Registro JSON guardado automáticamente"))
-                        .size(14.5)
-                        .color(GREEN),
-                );
-            } else {
-                let b = egui::Button::new(
-                    RichText::new(i18n::tr("💾  Guardar registro .json…"))
-                        .size(16.0)
-                        .strong()
-                        .color(Color32::WHITE),
-                )
-                .fill(ACCENT.linear_multiply(0.9))
-                .corner_radius(egui::CornerRadius::same(8))
-                .min_size(Vec2::new(250.0, 38.0));
-                if ui.add(b).clicked() {
-                    let default_name = r
-                        .revision
-                        .as_deref()
-                        .filter(|s| !s.is_empty())
-                        .unwrap_or(revision_name);
-                    if let Some(msg) = save_json_dialog(&json, capture_dir, default_name) {
-                        r.save_msg = Some(msg);
-                    }
-                }
-            }
-            ui.checkbox(
-                auto_json,
-                RichText::new(i18n::tr("Guardar JSON automáticamente"))
-                    .size(13.5)
-                    .color(MUTED),
-            );
-            if let Some((ok, msg)) = &r.save_msg {
-                ui.label(
-                    RichText::new(msg)
-                        .size(14.0)
-                        .color(if *ok { GREEN } else { RED }),
-                );
-            }
-        });
-    }
+    report_save_bar(ui, r, auto_json, capture_dir, revision_name);
 
     ui.add_space(12.0);
 
@@ -355,6 +275,110 @@ pub(crate) fn ui_report(
     });
     ui.add_space(14.0);
     gold_all_windows_panel(ui, &r.report, es_oro);
+    report_notes_panel(ui, r);
+
+
+    report_calibration(ui, es_oro, &r.report.params, vt);
+}
+
+/// Revision name, title, subtitle and capture notes.
+fn report_header(ui: &mut egui::Ui, r: &ReportView) {
+    ui.add_space(8.0);
+    if let Some(revision) = &r.revision {
+        if !revision.is_empty() {
+            ui.label(
+                RichText::new(revision)
+                    .family(strong_family())
+                    .size(21.0)
+                    .strong()
+                    .color(GOLD_BRIGHT),
+            );
+            ui.add_space(2.0);
+        }
+    }
+    // Serif headline with a gold halo ("infographic" style from the reference).
+    egui::Frame::default()
+        .inner_margin(egui::Margin::same(0))
+        .shadow(egui::Shadow {
+            offset: [0, 2],
+            blur: 16,
+            spread: 3,
+            color: GOLD.linear_multiply(0.30),
+        })
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(i18n::tr(&r.title))
+                    .family(display_family())
+                    .size(34.0)
+                    .strong()
+                    .color(GOLD_BRIGHT),
+            );
+        });
+    ui.label(RichText::new(r.subtitle.clone()).size(14.5).color(MUTED));
+    for n in &r.notes {
+        ui.label(RichText::new(format!("• {n}")).size(13.5).color(ACCENT_SOFT));
+    }
+}
+
+/// Manual JSON save button, the auto-save switch and its status message.
+fn report_save_bar(
+    ui: &mut egui::Ui,
+    r: &mut ReportView,
+    auto_json: &mut bool,
+    capture_dir: &Path,
+    revision_name: &str,
+) {
+    // Save the capture log.
+    if let Some(json) = r.json.clone() {
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            // With automatic saving enabled, the manual button would be redundant.
+            if *auto_json {
+                ui.label(
+                    RichText::new(i18n::tr("💾  Registro JSON guardado automáticamente"))
+                        .size(14.5)
+                        .color(GREEN),
+                );
+            } else {
+                let b = egui::Button::new(
+                    RichText::new(i18n::tr("💾  Guardar registro .json…"))
+                        .size(16.0)
+                        .strong()
+                        .color(Color32::WHITE),
+                )
+                .fill(ACCENT.linear_multiply(0.9))
+                .corner_radius(egui::CornerRadius::same(8))
+                .min_size(Vec2::new(250.0, 38.0));
+                if ui.add(b).clicked() {
+                    let default_name = r
+                        .revision
+                        .as_deref()
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or(revision_name);
+                    if let Some(msg) = save_json_dialog(&json, capture_dir, default_name) {
+                        r.save_msg = Some(msg);
+                    }
+                }
+            }
+            ui.checkbox(
+                auto_json,
+                RichText::new(i18n::tr("Guardar JSON automáticamente"))
+                    .size(13.5)
+                    .color(MUTED),
+            );
+            if let Some((ok, msg)) = &r.save_msg {
+                ui.label(
+                    RichText::new(msg)
+                        .size(14.0)
+                        .color(if *ok { GREEN } else { RED }),
+                );
+            }
+        });
+    }
+}
+
+/// Analyst notebook: free text saved in its own file.
+fn report_notes_panel(ui: &mut egui::Ui, r: &mut ReportView) {
     // Analyst notes block: free text, saved separately.
     ui.add_space(16.0);
     ui.separator();
@@ -450,10 +474,16 @@ pub(crate) fn ui_report(
                 .color(GOLD_BRIGHT),
         );
     }
+}
 
-
+/// Footer with the thresholds in force (gold or points).
+fn report_calibration(
+    ui: &mut egui::Ui,
+    es_oro: bool,
+    p: &ScoreParams,
+    vt: VisionThresholds,
+) {
     // Calibration (quick reference).
-    let p = &r.report.params;
     ui.add_space(14.0);
     ui.separator();
     ui.add_space(8.0);

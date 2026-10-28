@@ -191,188 +191,217 @@ impl App {
 
     fn handle_msg(&mut self, msg: Msg) {
         match msg {
-            Msg::LiveWaiting => {
-                self.live_hint = i18n::tr("Esperando a que arranque una partida…");
-            }
-            Msg::LiveGameId(id) => {
-                // New game/replay detected in the client: all state from the
-                // previous one is released so neither the dashboard nor the
-                // report is pinned to the previous gameId.
-                if self.active_game_id != Some(id) {
-                    log_debug(&format!(
-                        "handle_msg: new game_id {id} (previous {:?})",
-                        self.active_game_id
-                    ));
-                    self.active_game_id = Some(id);
-                    self.last_live = None;
-                    self.live_cursor_s = 0.0;
-                    self.live_cursor_manual = false;
-                }
-            }
-            Msg::LiveTick(cap) => {
-                self.live_hint.clear();
-                // If the user has not touched the time bar, we follow the
-                // live edge.
-                if !self.live_cursor_manual {
-                    self.live_cursor_s = cap.duration_s;
-                }
-                self.last_live = Some(cap);
-            }
-            Msg::LivePreview(cap) => {
-                if self.live_abandoned {
-                    return;
-                }
-                self.live_hint.clear();
-                let notes = vec![
-                    i18n::tr("Vista previa en vivo: el oro y los objetivos vienen del timeline del LCU del replay."),
-                    i18n::tr("La visión se sigue grabando y se completará al cerrar la reproducción."),
-                ];
-                let mut report = report_from_capture(cap, notes);
-                report.revision = Some(self.revision_name.clone());
-                self.view = View::Report(Box::new(report));
-            }
-            Msg::LiveDone(res) => {
-                self.live_running = false;
-                match res {
-                    Ok(cap) => {
-                        let abandoned = std::mem::take(&mut self.live_abandoned);
-                        if cap.poll_count == 0 {
-                            // No data: if the user cancelled by hand, we do not even
-                            // show the "no game" notice.
-                            if !abandoned {
-                                self.status = Some((
-                                    true,
-                                    i18n::tr("No se detectó ninguna partida: el cliente no respondió. Abre League y arranca una partida, luego prueba otra vez."),
-                                ));
-                            }
-                            self.view = View::Home;
-                        } else if abandoned {
-                            // Capture cancelled by hand: save it (the work is not
-                            // lost) but return Home without hijacking the screen.
-                            let note = if self.auto_guardar_json {
-                                match save_capture(&cap, &self.capture_dir, &self.revision_name) {
-                                    Ok(p) => i18n::trf("Captura en vivo terminada y guardada en {0}.", &[&p]),
-                                    Err(e) => i18n::trf("No se pudo guardar la captura en vivo: {0}", &[&e.to_string()]),
-                                }
-                            } else {
-                                i18n::tr("Captura en vivo terminada (guardado automático desactivado: no se ha escrito ningún archivo).")
-                            };
-                            self.status = Some((false, note));
-                            self.view = View::Home;
-                        } else {
-                            let mut notes = Vec::new();
-                            if let Some(id) = cap.game_id.or(self.active_game_id) {
-                                notes.push(i18n::trf(
-                                    "Partida enlazada por r3dlog: gameId {0}",
-                                    &[&id.to_string()],
-                                ));
-                            }
-                            if cap.dominion.fuente.contains("lcu") {
-                                notes.push(i18n::tr(
-                                    "Oro real del LCU: alertas, Top 5 y desglose por ejes calculados sobre el oro neto de cada ventana de 30 s.",
-                                ));
-                            } else {
-                                notes.push(i18n::tr(
-                                    "No se pudo enriquecer con el timeline del LCU: se muestra el score del modelo en vivo (puntos), no oro real.",
-                                ));
-                            }
-                            if let Some(v) = cap.vision_totals {
-                                if cap.dominion.vision.fuente.is_empty() {
-                                    notes.push(i18n::trf(
-                                        "Visión: {0} wards azules · {1} rojas (total medido; el timeline no da el desglose por minuto).",
-                                        &[&v.blue.to_string(), &v.red.to_string()],
-                                    ));
-                                }
-                            }
-                            if self.auto_guardar_json {
-                                match save_capture(&cap, &self.capture_dir, &self.revision_name) {
-                                    Ok(p) => notes.push(i18n::trf("Captura guardada en {0}", &[&p])),
-                                    Err(e) => {
-                                        notes.push(i18n::trf("No se pudo guardar la captura: {0}", &[&e.to_string()]))
-                                    }
-                                }
-                            } else {
-                                notes.push(i18n::tr(
-                                    "Guardado automático desactivado: esta captura no se ha escrito en disco; puedes guardarla a mano con «Guardar registro .json…».",
-                                ));
-                            }
-                            self.last_live = None;
-                            let mut report = report_from_capture(cap, notes);
-                            report.revision = Some(self.revision_name.clone());
-                            self.view = View::Report(Box::new(report));
-                        }
-
-                    }
-                    Err(e) => {
-                        self.status = Some((true, i18n::trf("Error en vivo: {0}", &[&e.to_string()])));
-                        self.view = View::Home;
-                    }
-                }
-            }
-            Msg::ReplayDone {
-                path,
-                result,
-                warning,
-            } => match result {
-                Ok(replay) => {
-                    let density = kill_density(&replay);
-                    self.view = View::Replay(Box::new(ReplayView {
-                        path,
-                        replay,
-                        density,
-                        warning,
-                    }));
-                }
-                Err(e) => {
-                    self.status = Some((
-                        true,
-                        i18n::trf(
-                            "No se pudo analizar el replay: {0}{1}",
-                            &[
-                                &e.to_string(),
-                                &warning
-                                    .as_deref()
-                                    .map(|w| format!(" · {w}"))
-                                    .unwrap_or_default(),
-                            ],
-                        ),
-                    ));
-                    self.view = View::Home;
-                }
-            },
-            Msg::LiveVisionReady { game_id, blocks } => {
-                let mut merged = false;
-                if let View::Report(r) = &mut self.view {
-                    if r.game_id == Some(game_id) {
-                        merge_vision_into_report(r, blocks.clone());
-                        merged = true;
-                    }
-                }
-                if !merged {
-                    self.pending_vision = Some((game_id, blocks));
-                }
-            }
-            Msg::RoflReport { report } => {
-                self.status = None;
-                let mut report = report;
-                if let Some((id, blocks)) = self.pending_vision.take() {
-                    if report.game_id == Some(id) {
-                        merge_vision_into_report(&mut *report, blocks);
-                    }
-                }
-                self.view = View::Report(report);
-            }
-            Msg::CaptureDone { path, result } => match result {
-                Ok(lc) => {
-                    self.view = View::Report(Box::new(report_from_loaded(&path, *lc)));
-                }
-                Err(e) => {
-                    self.status = Some((true, i18n::trf("No se pudo cargar la captura: {0}", &[&e.to_string()])));
-                    self.view = View::Home;
-                }
-            },
+            Msg::LiveWaiting => self.on_live_waiting(),
+            Msg::LiveGameId(id) => self.on_live_game_id(id),
+            Msg::LiveTick(cap) => self.on_live_tick(cap),
+            Msg::LivePreview(cap) => self.on_live_preview(cap),
+            Msg::LiveDone(res) => self.on_live_done(res),
+            Msg::ReplayDone { path, result, warning } => self.on_replay_done(path, result, warning),
+            Msg::LiveVisionReady { game_id, blocks } => self.on_live_vision_ready(game_id, blocks),
+            Msg::RoflReport { report } => self.on_rofl_report(report),
+            Msg::CaptureDone { path, result } => self.on_capture_done(path, result),
         }
     }
+
+    fn on_live_waiting(&mut self) {
+        self.live_hint = i18n::tr("Esperando a que arranque una partida…");
+    }
+
+    fn on_live_game_id(&mut self, id: u64) {
+        // New game/replay detected in the client: all state from the
+        // previous one is released so neither the dashboard nor the
+        // report is pinned to the previous gameId.
+        if self.active_game_id != Some(id) {
+            log_debug(&format!(
+                "handle_msg: new game_id {id} (previous {:?})",
+                self.active_game_id
+            ));
+            self.active_game_id = Some(id);
+            self.last_live = None;
+            self.live_cursor_s = 0.0;
+            self.live_cursor_manual = false;
+        }
+    }
+
+    fn on_live_tick(&mut self, cap: Box<ScrimCapture>) {
+        self.live_hint.clear();
+        // If the user has not touched the time bar, we follow the
+        // live edge.
+        if !self.live_cursor_manual {
+            self.live_cursor_s = cap.duration_s;
+        }
+        self.last_live = Some(cap);
+    }
+
+    fn on_live_preview(&mut self, cap: Box<ScrimCapture>) {
+        if self.live_abandoned {
+            return;
+        }
+        self.live_hint.clear();
+        let notes = vec![
+            i18n::tr("Vista previa en vivo: el oro y los objetivos vienen del timeline del LCU del replay."),
+            i18n::tr("La visión se sigue grabando y se completará al cerrar la reproducción."),
+        ];
+        let mut report = report_from_capture(cap, notes);
+        report.revision = Some(self.revision_name.clone());
+        self.view = View::Report(Box::new(report));
+    }
+
+    fn on_live_done(&mut self, res: Result<Box<ScrimCapture>, String>) {
+        self.live_running = false;
+        match res {
+            Ok(cap) => self.on_live_capture_finished(cap),
+            Err(e) => {
+                self.status = Some((true, i18n::trf("Error en vivo: {0}", &[&e.to_string()])));
+                self.view = View::Home;
+            }
+        }
+    }
+
+    /// Decides what to do with a capture that finished: notice, save + Home or
+    /// the final report.
+    fn on_live_capture_finished(&mut self, cap: Box<ScrimCapture>) {
+        let abandoned = std::mem::take(&mut self.live_abandoned);
+        if cap.poll_count == 0 {
+            // No data: if the user cancelled by hand, we do not even
+            // show the "no game" notice.
+            if !abandoned {
+                self.status = Some((
+                    true,
+                    i18n::tr("No se detectó ninguna partida: el cliente no respondió. Abre League y arranca una partida, luego prueba otra vez."),
+                ));
+            }
+            self.view = View::Home;
+        } else if abandoned {
+            // Capture cancelled by hand: save it (the work is not
+            // lost) but return Home without hijacking the screen.
+            let note = if self.auto_guardar_json {
+                match save_capture(&cap, &self.capture_dir, &self.revision_name) {
+                    Ok(p) => i18n::trf("Captura en vivo terminada y guardada en {0}.", &[&p]),
+                    Err(e) => i18n::trf("No se pudo guardar la captura en vivo: {0}", &[&e.to_string()]),
+                }
+            } else {
+                i18n::tr("Captura en vivo terminada (guardado automático desactivado: no se ha escrito ningún archivo).")
+            };
+            self.status = Some((false, note));
+            self.view = View::Home;
+        } else {
+            let notes = self.live_capture_notes(&cap);
+            self.last_live = None;
+            let mut report = report_from_capture(cap, notes);
+            report.revision = Some(self.revision_name.clone());
+            self.view = View::Report(Box::new(report));
+        }
+    }
+
+    /// Notes shown above the report of a live capture: game id, gold source,
+    /// vision totals and where the JSON was saved.
+    fn live_capture_notes(&mut self, cap: &ScrimCapture) -> Vec<String> {
+        let mut notes = Vec::new();
+        if let Some(id) = cap.game_id.or(self.active_game_id) {
+            notes.push(i18n::trf(
+                "Partida enlazada por r3dlog: gameId {0}",
+                &[&id.to_string()],
+            ));
+        }
+        if cap.dominion.fuente.contains("lcu") {
+            notes.push(i18n::tr(
+                "Oro real del LCU: alertas, Top 5 y desglose por ejes calculados sobre el oro neto de cada ventana de 30 s.",
+            ));
+        } else {
+            notes.push(i18n::tr(
+                "No se pudo enriquecer con el timeline del LCU: se muestra el score del modelo en vivo (puntos), no oro real.",
+            ));
+        }
+        if let Some(v) = cap.vision_totals {
+            if cap.dominion.vision.fuente.is_empty() {
+                notes.push(i18n::trf(
+                    "Visión: {0} wards azules · {1} rojas (total medido; el timeline no da el desglose por minuto).",
+                    &[&v.blue.to_string(), &v.red.to_string()],
+                ));
+            }
+        }
+        if self.auto_guardar_json {
+            match save_capture(cap, &self.capture_dir, &self.revision_name) {
+                Ok(p) => notes.push(i18n::trf("Captura guardada en {0}", &[&p])),
+                Err(e) => {
+                    notes.push(i18n::trf("No se pudo guardar la captura: {0}", &[&e.to_string()]))
+                }
+            }
+        } else {
+            notes.push(i18n::tr(
+                "Guardado automático desactivado: esta captura no se ha escrito en disco; puedes guardarla a mano con «Guardar registro .json…».",
+            ));
+        }
+        notes
+    }
+
+    fn on_replay_done(&mut self, path: String, result: Result<Box<Replay>, String>, warning: Option<String>) {
+        match result {
+            Ok(replay) => {
+                let density = kill_density(&replay);
+                self.view = View::Replay(Box::new(ReplayView {
+                    path,
+                    replay,
+                    density,
+                    warning,
+                }));
+            }
+            Err(e) => {
+                self.status = Some((
+                    true,
+                    i18n::trf(
+                        "No se pudo analizar el replay: {0}{1}",
+                        &[
+                            &e.to_string(),
+                            &warning
+                                .as_deref()
+                                .map(|w| format!(" · {w}"))
+                                .unwrap_or_default(),
+                        ],
+                    ),
+                ));
+                self.view = View::Home;
+            }
+        }
+    }
+
+    fn on_live_vision_ready(&mut self, game_id: u64, blocks: Vec<ScrimBlock>) {
+        let mut merged = false;
+        if let View::Report(r) = &mut self.view {
+            if r.game_id == Some(game_id) {
+                merge_vision_into_report(r, blocks.clone());
+                merged = true;
+            }
+        }
+        if !merged {
+            self.pending_vision = Some((game_id, blocks));
+        }
+    }
+
+    fn on_rofl_report(&mut self, report: Box<ReportView>) {
+        self.status = None;
+        let mut report = report;
+        if let Some((id, blocks)) = self.pending_vision.take() {
+            if report.game_id == Some(id) {
+                merge_vision_into_report(&mut *report, blocks);
+            }
+        }
+        self.view = View::Report(report);
+    }
+
+    fn on_capture_done(&mut self, path: String, result: Result<Box<LoadedCapture>, String>) {
+        match result {
+            Ok(lc) => {
+                self.view = View::Report(Box::new(report_from_loaded(&path, *lc)));
+            }
+            Err(e) => {
+                self.status = Some((true, i18n::trf("No se pudo cargar la captura: {0}", &[&e.to_string()])));
+                self.view = View::Home;
+            }
+        }
+    }
+
 
     /// Opens the revision-name dialog. The capture starts when the user
     /// confirms a non-empty name.
