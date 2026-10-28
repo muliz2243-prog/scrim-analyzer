@@ -3,6 +3,10 @@
 Nine screenshots, in order, for the README or a step-by-step walkthrough.
 All images live in [`screenshots/`](screenshots/) and are 1920×1080.
 
+They are the **annotated** set: the step number, the title and the caption are
+already drawn into the image, so each one works on its own in a gallery or a
+carousel. Player names from the client are blurred or cropped out.
+
 ## 01 — Choose where captures are saved
 
 ![Choose the save folder](screenshots/01_home_save.png)
