@@ -171,39 +171,8 @@ pub(crate) fn timeline_strip(ui: &mut egui::Ui, report: &DominionReport, height:
         let x = rect.left() + pad + i as f32 * col_w;
         let w = (col_w - 2.0).max(1.0);
         match b.severity {
-            Some(sev) => {
-                // Alert window: left half = severity, right half = team that
-                // holds the advantage (blue / dark red). This way the bar
-                // itself shows who the alert favors, not only its severity.
-                let team = if b.score_net_blue >= 0.0 { BLUE } else { TEAM_RED_DARK };
-                let half = (w * 0.5).max(1.0);
-                painter.rect_filled(
-                    Rect::from_min_size(
-                        Pos2::new(x + 1.0, base_y - bar_h),
-                        Vec2::new(half, bar_h),
-                    ),
-                    egui::CornerRadius { nw: 2, sw: 2, ne: 0, se: 0 },
-                    severity_color(sev),
-                );
-                painter.rect_filled(
-                    Rect::from_min_size(
-                        Pos2::new(x + 1.0 + half, base_y - bar_h),
-                        Vec2::new((w - half).max(1.0), bar_h),
-                    ),
-                    egui::CornerRadius { nw: 0, sw: 0, ne: 2, se: 2 },
-                    team,
-                );
-            }
-            None => {
-                let mag = ((b.score_net_blue.abs() / crit).min(1.0)) as f32;
-                let h = (bar_h * mag).max(3.0);
-                let c = if b.score_net_blue >= 0.0 { BLUE } else { RED };
-                painter.rect_filled(
-                    Rect::from_min_size(Pos2::new(x + 1.0, base_y - h), Vec2::new(w, h)),
-                    egui::CornerRadius::same(2),
-                    c.linear_multiply(0.42),
-                );
-            }
+            Some(sev) => timeline_strip_alert_bar(painter.clone(), x, w, base_y, bar_h, sev, b.score_net_blue),
+            None => timeline_strip_score_bar(painter.clone(), x, w, base_y, bar_h, b.score_net_blue, crit),
         }
     }
 
@@ -290,6 +259,32 @@ pub(crate) fn objective_verb(tipo: &str) -> String {
     })
 }
 
+fn timeline_strip_alert_bar(painter: egui::Painter, x: f32, w: f32, base_y: f32, bar_h: f32, sev: Severity, score_net_blue: f64) {
+    let team = if score_net_blue >= 0.0 { BLUE } else { TEAM_RED_DARK };
+    let half = (w * 0.5).max(1.0);
+    painter.rect_filled(
+        Rect::from_min_size(Pos2::new(x + 1.0, base_y - bar_h), Vec2::new(half, bar_h)),
+        egui::CornerRadius { nw: 2, sw: 2, ne: 0, se: 0 },
+        severity_color(sev),
+    );
+    painter.rect_filled(
+        Rect::from_min_size(Pos2::new(x + 1.0 + half, base_y - bar_h), Vec2::new((w - half).max(1.0), bar_h)),
+        egui::CornerRadius { nw: 0, sw: 0, ne: 2, se: 2 },
+        team,
+    );
+}
+
+fn timeline_strip_score_bar(painter: egui::Painter, x: f32, w: f32, base_y: f32, bar_h: f32, score_net_blue: f64, crit: f64) {
+    let mag = ((score_net_blue.abs() / (crit as f64)).min(1.0)) as f32;
+    let h = (bar_h * mag).max(3.0);
+    let c = if score_net_blue >= 0.0 { BLUE } else { RED };
+    painter.rect_filled(
+        Rect::from_min_size(Pos2::new(x + 1.0, base_y - h), Vec2::new(w, h)),
+        egui::CornerRadius::same(2),
+        c.linear_multiply(0.42),
+    );
+}
+
 /// A line of the chronological log: a score alert or an epic objective
 /// notice (which **does not** add or subtract score, but is a key data point).
 pub(crate) enum Linea {
@@ -344,159 +339,146 @@ pub(crate) fn sorted_vision_alerts(report: &DominionReport) -> Vec<VisionAlert> 
 pub(crate) fn live_alerts_preview(ui: &mut egui::Ui, report: &DominionReport) {
     let es_oro = report.fuente.contains("lcu");
     ui.columns(2, |cols| {
-        gold_alerts_preview(&mut cols[0], report, es_oro);
-        vision_alerts_preview(&mut cols[1], report);
-    });
-}
-
-/// Left panel: last gold/score alerts and objectives of the game.
-fn gold_alerts_preview(col: &mut egui::Ui, report: &DominionReport, es_oro: bool) {
-    egui::Frame::default()
-        .fill(PANEL)
-        .inner_margin(egui::Margin::same(12))
-        .corner_radius(egui::CornerRadius::same(10))
-        .stroke(egui::Stroke::new(1.0, ACCENT_SOFT.linear_multiply(0.55)))
-        .show(col, |ui| {
-            let kind = i18n::tr(if es_oro { "ORO" } else { "SCORE" });
-            ui.label(
-                RichText::new(i18n::trf(
-                    "⚠  ALERTAS DE {0}  ({1})",
-                    &[&kind, &report.breakpoints.len().to_string()],
-                ))
-                .size(16.0)
-                .strong()
-                .color(ACCENT_SOFT),
-            );
-            ui.add_space(4.0);
-            if report.breakpoints.is_empty() {
+        // ---- Gold / Score ----
+        egui::Frame::default()
+            .fill(PANEL)
+            .inner_margin(egui::Margin::same(12))
+            .corner_radius(egui::CornerRadius::same(10))
+            .stroke(egui::Stroke::new(1.0, ACCENT_SOFT.linear_multiply(0.55)))
+            .show(&mut cols[0], |ui| {
+                let kind = i18n::tr(if es_oro { "ORO" } else { "SCORE" });
                 ui.label(
-                    RichText::new(i18n::tr("Ninguna ventana superó el piso de alerta."))
-                        .size(14.0)
-                        .color(MUTED),
-                );
-            }
-            // Last 6 lines of the chronological log (alerts + objectives).
-            let lineas = lineas_cronologicas(report);
-            let desde = lineas.len().saturating_sub(6);
-            for linea in &lineas[desde..] {
-                match linea {
-                    Linea::Objetivo(o) => objective_row(ui, o),
-                    Linea::Alerta(q) => alert_row(ui, q, es_oro),
-                }
-            }
-        });
-}
-
-/// One epic objective in the chronological log.
-fn objective_row(ui: &mut egui::Ui, o: &ObjectiveEvent) {
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(i18n::tr("◆")).size(14.5).color(GOLD));
-        ui.label(
-            RichText::new(i18n::trf(
-                "[{0}]  {1} {2} {3}",
-                &[
-                    &mmss(o.start_s),
-                    &team_name(o.team),
-                    &objective_verb(&o.tipo),
-                    &objective_name(&o.tipo),
-                ],
-            ))
-            .size(14.5)
-            .color(team_color(o.team)),
-        );
-    });
-}
-
-/// One gold/score alert in the chronological log.
-fn alert_row(ui: &mut egui::Ui, q: &BreakAlert, es_oro: bool) {
-    let magnitud = if es_oro {
-        format!("{:+.0}g", q.score_net_blue)
-    } else {
-        format!("{:+.1}", q.score_net_blue)
-    };
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(i18n::tr("▮"))
-                .size(14.5)
-                .color(severity_color(q.severity)),
-        );
-        ui.label(
-            RichText::new(i18n::trf(
-                "[{0} – {1}]   {2}   ·   Ventaja a favor del {3}   ·   {4}",
-                &[
-                    &mmss(q.start_s),
-                    &mmss(q.end_s),
-                    &magnitud,
-                    &team_name(q.favorecido),
-                    &severity_label(q.severity),
-                ],
-            ))
-            .size(14.5)
-            .color(team_color(q.favorecido)),
-        );
-    });
-}
-
-/// Right panel: last vision alerts of the game.
-fn vision_alerts_preview(col: &mut egui::Ui, report: &DominionReport) {
-    egui::Frame::default()
-        .fill(PANEL)
-        .inner_margin(egui::Margin::same(12))
-        .corner_radius(egui::CornerRadius::same(10))
-        .stroke(egui::Stroke::new(1.0, TEAL.linear_multiply(0.55)))
-        .show(col, |ui| {
-            ui.label(
-                RichText::new(i18n::trf(
-                    "👁  ALERTAS DE VISIÓN  ({0})",
-                    &[&report.vision.alerts.len().to_string()],
-                ))
-                .size(16.0)
-                .strong()
-                .color(TEAL),
-            );
-            ui.add_space(4.0);
-            if report.vision.alerts.is_empty() {
-                ui.label(
-                    RichText::new(i18n::tr("Sin alertas de visión por ahora."))
-                        .size(14.0)
-                        .color(MUTED),
-                );
-                ui.label(
-                    RichText::new(i18n::tr(
-                        "Tutorial: reproduce toda la partida en 8x mientras la app graba; así detecta las variaciones de visión.",
+                    RichText::new(i18n::trf(
+                        "⚠  ALERTAS DE {0}  ({1})",
+                        &[&kind, &report.breakpoints.len().to_string()],
                     ))
-                    .size(12.5)
-                    .color(AMBER),
+                    .size(16.0)
+                    .strong()
+                    .color(ACCENT_SOFT),
                 );
-            }
-            let alerts = sorted_vision_alerts(report);
-            let desde = alerts.len().saturating_sub(6);
-            for a in &alerts[desde..] {
-                ui.horizontal(|ui| {
+                ui.add_space(4.0);
+                if report.breakpoints.is_empty() {
                     ui.label(
-                        RichText::new(i18n::tr("▮"))
-                            .size(14.5)
-                            .color(severity_color(a.severity)),
+                        RichText::new(i18n::tr("Ninguna ventana superó el piso de alerta."))
+                            .size(14.0)
+                            .color(MUTED),
+                    );
+                }
+                // Last 6 lines of the chronological log (alerts + objectives).
+                let lineas = lineas_cronologicas(report);
+                let desde = lineas.len().saturating_sub(6);
+                for linea in &lineas[desde..] {
+                    match linea {
+                        Linea::Objetivo(o) => {
+                            ui.horizontal(|ui| {
+                                ui.label(RichText::new(i18n::tr("◆")).size(14.5).color(GOLD));
+                                ui.label(
+                                    RichText::new(i18n::trf(
+                                        "[{0}]  {1} {2} {3}",
+                                        &[
+                                            &mmss(o.start_s),
+                                            &team_name(o.team),
+                                            &objective_verb(&o.tipo),
+                                            &objective_name(&o.tipo),
+                                        ],
+                                    ))
+                                    .size(14.5)
+                                    .color(team_color(o.team)),
+                                );
+                            });
+                        }
+                        Linea::Alerta(q) => {
+                            let magnitud = if es_oro {
+                                format!("{:+.0}g", q.score_net_blue)
+                            } else {
+                                format!("{:+.1}", q.score_net_blue)
+                            };
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(i18n::tr("▮"))
+                                        .size(14.5)
+                                        .color(severity_color(q.severity)),
+                                );
+                                ui.label(
+                                    RichText::new(i18n::trf(
+                                        "[{0} – {1}]   {2}   ·   Ventaja a favor del {3}   ·   {4}",
+                                        &[
+                                            &mmss(q.start_s),
+                                            &mmss(q.end_s),
+                                            &magnitud,
+                                            &team_name(q.favorecido),
+                                            &severity_label(q.severity),
+                                        ],
+                                    ))
+                                    .size(14.5)
+                                    .color(team_color(q.favorecido)),
+                                );
+                            });
+                        }
+                    }
+                }
+            });
+
+        // ---- Vision ----
+        egui::Frame::default()
+            .fill(PANEL)
+            .inner_margin(egui::Margin::same(12))
+            .corner_radius(egui::CornerRadius::same(10))
+            .stroke(egui::Stroke::new(1.0, TEAL.linear_multiply(0.55)))
+            .show(&mut cols[1], |ui| {
+                ui.label(
+                    RichText::new(i18n::trf(
+                        "👁  ALERTAS DE VISIÓN  ({0})",
+                        &[&report.vision.alerts.len().to_string()],
+                    ))
+                    .size(16.0)
+                    .strong()
+                    .color(TEAL),
+                );
+                ui.add_space(4.0);
+                if report.vision.alerts.is_empty() {
+                    ui.label(
+                        RichText::new(i18n::tr("Sin alertas de visión por ahora."))
+                            .size(14.0)
+                            .color(MUTED),
                     );
                     ui.label(
-                        RichText::new(i18n::trf(
-                            "[{0} – {1}]   visión azul {2} · visión roja {3}   ·   Δ {4} a favor del {5}   ·   {6}",
-                            &[
-                                &mmss(a.start_s),
-                                &mmss(a.end_s),
-                                &format!("{:.1}", a.delta_azul),
-                                &format!("{:.1}", a.delta_rojo),
-                                &format!("{:.1}", (a.delta_azul - a.delta_rojo).abs()),
-                                &team_name(a.favorecido),
-                                &severity_label(a.severity),
-                            ],
+                        RichText::new(i18n::tr(
+                            "Tutorial: reproduce toda la partida en 8x mientras la app graba; así detecta las variaciones de visión.",
                         ))
-                        .size(14.5)
-                        .color(team_color(a.favorecido)),
+                        .size(12.5)
+                        .color(AMBER),
                     );
-                });
-            }
-        });
+                }
+                let alerts = sorted_vision_alerts(report);
+                let desde = alerts.len().saturating_sub(6);
+                for a in &alerts[desde..] {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(i18n::tr("▮"))
+                                .size(14.5)
+                                .color(severity_color(a.severity)),
+                        );
+                        ui.label(
+                            RichText::new(i18n::trf(
+                                "[{0} – {1}]   visión azul {2} · visión roja {3}   ·   Δ {4} a favor del {5}   ·   {6}",
+                                &[
+                                    &mmss(a.start_s),
+                                    &mmss(a.end_s),
+                                    &format!("{:.1}", a.delta_azul),
+                                    &format!("{:.1}", a.delta_rojo),
+                                    &format!("{:.1}", (a.delta_azul - a.delta_rojo).abs()),
+                                    &team_name(a.favorecido),
+                                    &severity_label(a.severity),
+                                ],
+                            ))
+                            .size(14.5)
+                            .color(team_color(a.favorecido)),
+                        );
+                    });
+                }
+            });
+    });
 }
 
 pub(crate) fn top5_column(

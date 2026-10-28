@@ -64,6 +64,10 @@ pub(crate) fn save_capture(cap: &ScrimCapture, dir: &Path, name: &str) -> Result
 /// Recomputes a report from a saved capture (same logic as `--recalc`).
 pub(crate) fn load_capture(path: &str) -> Result<LoadedCapture, String> {
     let (raw, v) = read_capture_json(path)?;
+    load_capture_from_json(path, raw, v)
+}
+
+fn load_capture_from_json(path: &str, raw: String, v: serde_json::Value) -> Result<LoadedCapture, String> {
     let null = serde_json::Value::Null;
     let mut blocks: Vec<ScrimBlock> = serde_json::from_value(
         v.get("blocks").cloned().unwrap_or(null.clone()),

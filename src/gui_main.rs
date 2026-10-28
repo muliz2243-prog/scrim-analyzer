@@ -434,66 +434,7 @@ impl App {
                     .stroke(egui::Stroke::new(1.0, GOLD.linear_multiply(0.65))),
             )
             .show(ctx, |ui| {
-                ui.set_width(480.0);
-                ui.label(
-                    RichText::new(i18n::tr("Nombre de la revisión"))
-                        .family(strong_family())
-                        .size(24.0)
-                        .strong()
-                        .color(GOLD_BRIGHT),
-                );
-                ui.add_space(5.0);
-                ui.label(
-                    RichText::new(i18n::tr(
-                        "Escoge un nombre para esta revisión. Se mostrará arriba y será el nombre del archivo .json que se guarde en la carpeta elegida.",
-                    ))
-                    .size(14.0)
-                    .color(MUTED),
-                );
-                ui.add_space(12.0);
-                let edit = ui.add(
-                    egui::TextEdit::singleline(&mut dialog.input)
-                        .hint_text(i18n::tr("Nombre de la revisión…"))
-                        .desired_width(f32::INFINITY)
-                        .font(egui::TextStyle::Body),
-                );
-                if dialog.focus {
-                    edit.request_focus();
-                    dialog.focus = false;
-                }
-                if dialog.empty_name {
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new(i18n::tr("Escribe un nombre para la revisión."))
-                            .size(13.0)
-                            .color(RED),
-                    );
-                }
-                let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                ui.add_space(16.0);
-                ui.horizontal(|ui| {
-                    let start = egui::Button::new(
-                        RichText::new(i18n::tr("Comenzar captura"))
-                            .size(17.0)
-                            .strong()
-                            .color(Color32::WHITE),
-                    )
-                    .fill(ACCENT)
-                    .corner_radius(egui::CornerRadius::same(9))
-                    .min_size(Vec2::new(190.0, 40.0));
-                    if ui.add(start).clicked() || enter {
-                        accept = true;
-                    }
-                    let cancel_btn = egui::Button::new(
-                        RichText::new(i18n::tr("Cancelar")).size(15.0).color(MUTED),
-                    )
-                    .fill(PANEL2)
-                    .corner_radius(egui::CornerRadius::same(9))
-                    .min_size(Vec2::new(110.0, 40.0));
-                    if ui.add(cancel_btn).clicked() {
-                        cancel = true;
-                    }
-                });
+                Self::revision_dialog_content(ui, &mut dialog, &mut accept, &mut cancel);
             });
         if response.should_close() {
             cancel = true;
@@ -517,6 +458,70 @@ impl App {
         } else if !cancel {
             self.revision_dialog = Some(dialog);
         }
+    }
+
+/// Content of the revision name dialog (label, text edit, buttons, validation).
+    fn revision_dialog_content(ui: &mut egui::Ui, dialog: &mut RevisionDialog, accept: &mut bool, cancel: &mut bool) {
+        ui.set_width(480.0);
+        ui.label(
+            RichText::new(i18n::tr("Nombre de la revisión"))
+                .family(strong_family())
+                .size(24.0)
+                .strong()
+                .color(GOLD_BRIGHT),
+        );
+        ui.add_space(5.0);
+        ui.label(
+            RichText::new(i18n::tr(
+                "Escoge un nombre para esta revisión. Se mostrará arriba y será el nombre del archivo .json que se guarde en la carpeta elegida.",
+            ))
+            .size(14.0)
+            .color(MUTED),
+        );
+        ui.add_space(12.0);
+        let edit = ui.add(
+            egui::TextEdit::singleline(&mut dialog.input)
+                .hint_text(i18n::tr("Nombre de la revisión…"))
+                .desired_width(f32::INFINITY)
+                .font(egui::TextStyle::Body),
+        );
+        if dialog.focus {
+            edit.request_focus();
+            dialog.focus = false;
+        }
+        if dialog.empty_name {
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(i18n::tr("Escribe un nombre para la revisión."))
+                    .size(13.0)
+                    .color(RED),
+            );
+        }
+        let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        ui.add_space(16.0);
+        ui.horizontal(|ui| {
+            let start = egui::Button::new(
+                RichText::new(i18n::tr("Comenzar captura"))
+                    .size(17.0)
+                    .strong()
+                    .color(Color32::WHITE),
+            )
+            .fill(ACCENT)
+            .corner_radius(egui::CornerRadius::same(9))
+            .min_size(Vec2::new(190.0, 40.0));
+            if ui.add(start).clicked() || enter {
+                *accept = true;
+            }
+            let cancel_btn = egui::Button::new(
+                RichText::new(i18n::tr("Cancelar")).size(15.0).color(MUTED),
+            )
+            .fill(PANEL2)
+            .corner_radius(egui::CornerRadius::same(9))
+            .min_size(Vec2::new(110.0, 40.0));
+            if ui.add(cancel_btn).clicked() {
+                *cancel = true;
+            }
+        });
     }
 
     fn start_live(&mut self) {
