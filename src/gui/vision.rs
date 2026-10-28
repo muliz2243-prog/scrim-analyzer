@@ -256,179 +256,226 @@ pub(crate) fn vision_dashboard(ui: &mut egui::Ui, vision_blocks: &[ScrimBlock], 
             ui.add_space(6.0);
 
             let n = ((dur.max(W) / W).ceil() as usize).max(1);
-            let mut blue = vec![0.0f64; n];
-            let mut red = vec![0.0f64; n];
-            let mut con_datos = false;
-            for b in vision_blocks {
-                let idx = (b.start_s / W).floor() as usize;
-                if idx >= n {
-                    continue;
-                }
-                blue[idx] += b.ward_blue_delta;
-                red[idx] += b.ward_red_delta;
-                if b.ward_blue_delta.abs() + b.ward_red_delta.abs() > 0.0 {
-                    con_datos = true;
-                }
-            }
+            let (blue, red, con_datos) = vision_windows(vision_blocks, n, W);
             if !con_datos {
-                egui::Frame::default()
-                    .fill(INSET)
-                    .inner_margin(egui::Margin::same(10))
-                    .corner_radius(egui::CornerRadius::same(6))
-                    .show(ui, |ui| {
-                        ui.label(
-                            RichText::new(i18n::tr("TUTORIAL: cómo obtener visión por minuto"))
-                                .size(13.5)
-                                .strong()
-                                .color(AMBER),
-                        );
-                        ui.label(
-                            RichText::new(i18n::tr(
-                                "1) Abre el replay en League. 2) Déjalo reproducir completo, puedes poner 8x. 3) La app graba `wardScore` en segundo plano. 4) Al cerrarlo, los datos se fusionan solos con este informe.",
-                            ))
-                            .size(12.5)
-                            .color(TEXT),
-                        );
-                        ui.add_space(3.0);
-                        ui.label(
-                            RichText::new(i18n::tr(
-                                "El timeline del LCU no expone `wardScore` por minuto y el .rofl sólo da el total. Sin reproducción en vivo no hay serie que mostrar.",
-                            ))
-                            .size(11.5)
-                            .color(MUTED),
-                        );
-                    });
+                vision_tutorial(ui);
                 return;
             }
 
-            let fmt_v = |v: f64| {
-                if es_ward_score {
-                    format!("{v:.1}")
-                } else {
-                    format!("{v:.0}")
-                }
-            };
-            let mut orden: Vec<usize> = (0..n)
-                .filter(|&i| blue[i].abs() + red[i].abs() > 0.0)
-                .collect();
-            let diff_at = |i: usize| blue[i] - red[i];
-            orden.sort_by(|&a, &b| {
-                diff_at(b)
-                    .partial_cmp(&diff_at(a))
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
+            let orden = vision_order(&blue, &red);
             let mut orden_rojo = orden.clone();
             orden_rojo.reverse();
 
             ui.columns(2, |cols| {
-                // Left: 2-minute table.
-                egui::Grid::new("vision_dashboard_grid")
-                    .num_columns(4)
-                    .spacing([8.0, 4.0])
-                    .striped(true)
-                    .show(&mut cols[0], |ui| {
-                        for h in ["VENTANA", "AZUL", "ROJO", "VENTAJA"] {
-                            ui.label(
-                                RichText::new(i18n::tr(h))
-                                    .size(11.0)
-                                    .strong()
-                                    .color(GOLD_BRIGHT),
-                            );
-                        }
-                        ui.end_row();
-                        for i in 0..n {
-                            let (b, r) = (blue[i], red[i]);
-                            let start = i as f32 * W;
-                            let end = ((i + 1) as f32 * W).min(dur.max(W));
-                            ui.label(
-                                RichText::new(format!("[{} – {}]", mmss(start), mmss(end)))
-                                    .size(11.0)
-                                    .color(TEXT),
-                            );
-                            ui.label(
-                                RichText::new(fmt_v(b))
-                                    .size(11.5)
-                                    .strong()
-                                    .color(BLUE),
-                            );
-                            ui.label(
-                                RichText::new(fmt_v(r))
-                                    .size(11.5)
-                                    .strong()
-                                    .color(RED),
-                            );
-                            let diff = b - r;
-                            let (txt, col) = if b.abs() < 0.001 && r.abs() < 0.001 {
-                                ("—".to_string(), MUTED)
-                            } else if diff.abs() < 0.05 {
-                                ("0".to_string(), MUTED)
-                            } else if diff > 0.0 {
-                                (format!("{} +{diff:.1}", i18n::tr("AZUL")), BLUE)
-                            } else {
-                                (format!("{} +{:.1}", i18n::tr("ROJO"), diff.abs()), RED)
-                            };
-                            ui.label(RichText::new(txt).size(11.0).color(col));
-                            ui.end_row();
-                        }
-                    });
-                cols[0].label(
-                    RichText::new(i18n::tr(
-                        "Diferencia = visión AZUL − ROJO. «—» = sin actividad; «0» = empate.",
-                    ))
-                    .size(10.5)
-                    .color(MUTED),
+                vision_table(&mut cols[0], &blue, &red, dur, W, es_ward_score);
+                vision_top_windows(
+                    &mut cols[1],
+                    &orden,
+                    &orden_rojo,
+                    &blue,
+                    &red,
+                    dur,
+                    W,
+                    es_ward_score,
                 );
-
-                // Right: best vision windows for each team.
-                let col = &mut cols[1];
-                col.label(
-                    RichText::new(i18n::tr("MEJORES VENTANAS DE VISIÓN"))
-                        .family(strong_family())
-                        .size(17.5)
-                        .color(GOLD_BRIGHT),
-                );
-                col.label(
-                    RichText::new(i18n::tr("De mejor a peor para cada equipo (2 min)."))
-                        .size(13.0)
-                        .color(MUTED),
-                );
-                col.add_space(6.0);
-                let top = 5usize;
-                for (titulo, indices, color) in [
-                    ("AZUL", &orden, BLUE),
-                    ("ROJO", &orden_rojo, RED),
-                ] {
-                    col.label(RichText::new(i18n::tr(titulo)).size(15.0).strong().color(color));
-                    if indices.is_empty() {
-                        col.label(RichText::new(i18n::tr("—")).size(13.5).color(MUTED));
-                    }
-                    for &i in indices.iter().take(top) {
-                        let start = i as f32 * W;
-                        let end = ((i + 1) as f32 * W).min(dur.max(W));
-                        let d = if titulo == "AZUL" {
-                            blue[i] - red[i]
-                        } else {
-                            red[i] - blue[i]
-                        };
-                        col.label(
-                            RichText::new(i18n::trf(
-                                "[{0} – {1}]  +{2}",
-                                &[&mmss(start), &mmss(end), &fmt_v(d.abs())],
-                            ))
-                            .size(14.5)
-                            .color(color),
-                        );
-                    }
-                    col.add_space(8.0);
-                }
             });
         });
 }
 
-/// BLUE vs RED comparison table of what generated the gold in the window.
+/// Adds the 30 s blocks into 2-minute windows: `(blue, red, hay_datos)`.
+fn vision_windows(vision_blocks: &[ScrimBlock], n: usize, w: f32) -> (Vec<f64>, Vec<f64>, bool) {
+    let mut blue = vec![0.0f64; n];
+    let mut red = vec![0.0f64; n];
+    let mut con_datos = false;
+    for b in vision_blocks {
+        let idx = (b.start_s / w).floor() as usize;
+        if idx >= n {
+            continue;
+        }
+        blue[idx] += b.ward_blue_delta;
+        red[idx] += b.ward_red_delta;
+        if b.ward_blue_delta.abs() + b.ward_red_delta.abs() > 0.0 {
+            con_datos = true;
+        }
+    }
+    (blue, red, con_datos)
+}
+
+/// How to get the per-minute vision when the capture does not have it yet.
+fn vision_tutorial(ui: &mut egui::Ui) {
+    egui::Frame::default()
+        .fill(INSET)
+        .inner_margin(egui::Margin::same(10))
+        .corner_radius(egui::CornerRadius::same(6))
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(i18n::tr("TUTORIAL: cómo obtener visión por minuto"))
+                    .size(13.5)
+                    .strong()
+                    .color(AMBER),
+            );
+            ui.label(
+                RichText::new(i18n::tr(
+                    "1) Abre el replay en League. 2) Déjalo reproducir completo, puedes poner 8x. 3) La app graba `wardScore` en segundo plano. 4) Al cerrarlo, los datos se fusionan solos con este informe.",
+                ))
+                .size(12.5)
+                .color(TEXT),
+            );
+            ui.add_space(3.0);
+            ui.label(
+                RichText::new(i18n::tr(
+                    "El timeline del LCU no expone `wardScore` por minuto y el .rofl sólo da el total. Sin reproducción en vivo no hay serie que mostrar.",
+                ))
+                .size(11.5)
+                .color(MUTED),
+            );
+        });
+}
+
+/// Vision value with the right number of decimals for the current source.
+fn fmt_vision(v: f64, es_ward_score: bool) -> String {
+    if es_ward_score {
+        format!("{v:.1}")
+    } else {
+        format!("{v:.0}")
+    }
+}
+
+/// Window indices sorted from best to worst for blue.
+fn vision_order(blue: &[f64], red: &[f64]) -> Vec<usize> {
+    let mut orden: Vec<usize> = (0..blue.len())
+        .filter(|&i| blue[i].abs() + red[i].abs() > 0.0)
+        .collect();
+    let diff_at = |i: usize| blue[i] - red[i];
+    orden.sort_by(|&a, &b| {
+        diff_at(b)
+            .partial_cmp(&diff_at(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    orden
+}
+
+/// 2-minute table of the vision of each team.
+fn vision_table(
+    col: &mut egui::Ui,
+    blue: &[f64],
+    red: &[f64],
+    dur: f32,
+    w: f32,
+    es_ward_score: bool,
+) {
+    egui::Grid::new("vision_dashboard_grid")
+        .num_columns(4)
+        .spacing([8.0, 4.0])
+        .striped(true)
+        .show(col, |ui| {
+            for h in ["VENTANA", "AZUL", "ROJO", "VENTAJA"] {
+                ui.label(
+                    RichText::new(i18n::tr(h))
+                        .size(11.0)
+                        .strong()
+                        .color(GOLD_BRIGHT),
+                );
+            }
+            ui.end_row();
+            for i in 0..blue.len() {
+                let (b, r) = (blue[i], red[i]);
+                let start = i as f32 * w;
+                let end = ((i + 1) as f32 * w).min(dur.max(w));
+                ui.label(
+                    RichText::new(format!("[{} – {}]", mmss(start), mmss(end)))
+                        .size(11.0)
+                        .color(TEXT),
+                );
+                ui.label(
+                    RichText::new(fmt_vision(b, es_ward_score))
+                        .size(11.5)
+                        .strong()
+                        .color(BLUE),
+                );
+                ui.label(
+                    RichText::new(fmt_vision(r, es_ward_score))
+                        .size(11.5)
+                        .strong()
+                        .color(RED),
+                );
+                let diff = b - r;
+                let (txt, col) = if b.abs() < 0.001 && r.abs() < 0.001 {
+                    ("—".to_string(), MUTED)
+                } else if diff.abs() < 0.05 {
+                    ("0".to_string(), MUTED)
+                } else if diff > 0.0 {
+                    (format!("{} +{diff:.1}", i18n::tr("AZUL")), BLUE)
+                } else {
+                    (format!("{} +{:.1}", i18n::tr("ROJO"), diff.abs()), RED)
+                };
+                ui.label(RichText::new(txt).size(11.0).color(col));
+                ui.end_row();
+            }
+        });
+    col.label(
+        RichText::new(i18n::tr(
+            "Diferencia = visión AZUL − ROJO. «—» = sin actividad; «0» = empate.",
+        ))
+        .size(10.5)
+        .color(MUTED),
+    );
+}
+
+/// Best vision windows of each team.
+fn vision_top_windows(
+    col: &mut egui::Ui,
+    orden: &[usize],
+    orden_rojo: &[usize],
+    blue: &[f64],
+    red: &[f64],
+    dur: f32,
+    w: f32,
+    es_ward_score: bool,
+) {
+    col.label(
+        RichText::new(i18n::tr("MEJORES VENTANAS DE VISIÓN"))
+            .family(strong_family())
+            .size(17.5)
+            .color(GOLD_BRIGHT),
+    );
+    col.label(
+        RichText::new(i18n::tr("De mejor a peor para cada equipo (2 min)."))
+            .size(13.0)
+            .color(MUTED),
+    );
+    col.add_space(6.0);
+    let top = 5usize;
+    for (titulo, indices, color) in [("AZUL", orden, BLUE), ("ROJO", orden_rojo, RED)] {
+        col.label(RichText::new(i18n::tr(titulo)).size(15.0).strong().color(color));
+        if indices.is_empty() {
+            col.label(RichText::new(i18n::tr("—")).size(13.5).color(MUTED));
+        }
+        for &i in indices.iter().take(top) {
+            let start = i as f32 * w;
+            let end = ((i + 1) as f32 * w).min(dur.max(w));
+            let d = if titulo == "AZUL" {
+                blue[i] - red[i]
+            } else {
+                red[i] - blue[i]
+            };
+            col.label(
+                RichText::new(i18n::trf(
+                    "[{0} – {1}]  +{2}",
+                    &[&mmss(start), &mmss(end), &fmt_vision(d.abs(), es_ward_score)],
+                ))
+                .size(14.5)
+                .color(color),
+            );
+        }
+        col.add_space(8.0);
+    }
+}
+
 /// Aggregated rows of the breakdown table: `(blue, red, available)` per category.
 type BreakdownMap = std::collections::BTreeMap<&'static str, (f64, f64, bool)>;
 
+/// BLUE vs RED comparison table of what generated the gold in the window.
 pub(crate) fn alert_breakdown_table(ui: &mut egui::Ui, block: &DominionBlock, es_oro: bool, show_diff: bool) {
     let extra_label = if es_oro {
         "Oro extra (wards, placas no detectadas, pasivo…)"

@@ -250,54 +250,7 @@ pub(crate) fn spawn_live(tx: Sender<Msg>, stop: Arc<AtomicBool>) {
             // The link is decided by the client's `r3dlog`, not by the most
             // recent .rofl: an old downloaded replay no longer hijacks the app.
             if ticks % 5 == 1 {
-                if let Some(session) = lcu::find_active_session() {
-                    let id = session.game_id;
-                    if announced_game_id != Some(id) {
-                        announced_game_id = Some(id);
-                        log_debug(&format!("spawn_live: new game_id detected = {id}"));
-                        let _ = tx.send(Msg::LiveGameId(id));
-                    }
-                    // Replay: the official timeline already exists. It is loaded once and
-                    // applied on every tick so the dashboard shows gold,
-                    // objectives and Top 5 without waiting for the end.
-                    if session.is_replay
-                        && replay_cache.as_ref().map(|(i, ..)| *i) != Some(id)
-                    {
-                        if lcu_mid.is_none() {
-                            lcu_mid = LcuClient::connect().ok();
-                        }
-                        if let Some(client) = &lcu_mid {
-                            match client.get_timeline(id) {
-                                Ok(timeline) => {
-                                    let summary = client.get_match_summary(id).ok();
-                                    log_debug(&format!(
-                                        "spawn_live: replay timeline {id} loaded live"
-                                    ));
-                                    replay_cache = Some((id, timeline, summary));
-                                    let _ = tx.send(Msg::LiveGameId(id));
-                                    // Immediate preview: replay gold/objectives
-                                    // right away, without waiting for the end.
-                                    let mut preview = poller.build_capture();
-                                    if let Some((pid, ptl, psum)) = &replay_cache {
-                                        apply_lcu_enrichment(
-                                            &mut preview,
-                                            *pid,
-                                            ptl,
-                                            psum.clone(),
-                                            true,
-                                        );
-                                    }
-                                    let _ = tx.send(Msg::LivePreview(Box::new(preview)));
-                                }
-                                Err(e) => {
-                                    log_debug(&format!(
-                                        "spawn_live: replay {id} has no timeline yet: {e}"
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                }
+                poll_session(&tx, &mut poller, &mut announced_game_id, &mut replay_cache, &mut lcu_mid);
             }
             // End of game: the API stops responding for several polls.
             if poller.looks_finished(3) {
@@ -313,80 +266,7 @@ pub(crate) fn spawn_live(tx: Sender<Msg>, stop: Arc<AtomicBool>) {
             cap.players.len()
         ));
 
-        // Wait for the client to finish writing the `.rofl`/`r3dlog` and for
-        // the LCU to publish the timeline. In real games the timeline takes
-        // a few seconds and the `r3dlog` may be locked while the game
-        // is still open: that is why it is retried for ~40 s.
-        std::thread::sleep(Duration::from_millis(1500));
-
-        let mut enriquecida = false;
-        if let Some((id, timeline, summary)) = &replay_cache {
-            apply_lcu_enrichment(&mut cap, *id, timeline, summary.clone(), true);
-            enriquecida = true;
-        }
-
-        if !enriquecida {
-        match LcuClient::connect() {
-            Err(e) => {
-                log_debug(&format!("spawn_live: LCU unavailable: {e}"));
-                cap.omisiones.push(i18n::trf(
-                    "No se pudo conectar al LCU ({0}); el informe se queda con el score del modelo en vivo.",
-                    &[&e.to_string()],
-                ));
-            }
-            Ok(lcu_client) => {
-                log_debug("spawn_live: LCU connected");
-                let mut vistos: Vec<u64> = Vec::new();
-                for attempt in 0..20 {
-                    let candidates =
-                        game_id_candidates(announced_game_id, session_start, attempt >= 10);
-                    if candidates != vistos {
-                        log_debug(&format!(
-                            "spawn_live: attempt {} candidates = {:?}",
-                            attempt + 1,
-                            candidates
-                        ));
-                        vistos = candidates.clone();
-                    }
-                    for id in &candidates {
-                        match lcu_client.get_timeline(*id) {
-                            Ok(timeline) => {
-                                let summary = match lcu_client.get_match_summary(*id) {
-                                    Ok(s) => Some(s),
-                                    Err(e) => {
-                                        log_debug(&format!(
-                                            "spawn_live: match summary {id} unavailable: {e}"
-                                        ));
-                                        None
-                                    }
-                                };
-                                apply_lcu_enrichment(&mut cap, *id, &timeline, summary, true);
-                                enriquecida = true;
-                                break;
-                            }
-                            Err(e) => {
-                                if attempt == 0 || attempt % 5 == 0 {
-                                    log_debug(&format!(
-                                        "spawn_live: get_timeline({id}) ERROR: {e}"
-                                    ));
-                                }
-                            }
-                        }
-                    }
-                    if enriquecida {
-                        break;
-                    }
-                    std::thread::sleep(Duration::from_millis(2000));
-                }
-                if !enriquecida {
-                    log_debug("spawn_live: no gameId produced a timeline after 40 s");
-                    cap.omisiones.push(i18n::tr(
-                        "Ningún gameId de esta sesión tiene timeline en el LCU; el informe se queda con el score del modelo en vivo.",
-                    ));
-                }
-            }
-        }
-        }
+        enrich_final_capture(&mut cap, &replay_cache, announced_game_id, session_start);
 
         log_debug(&format!("spawn_live: final breakpoints={}, vision_alerts={}", cap.dominion.breakpoints.len(), cap.dominion.vision.alerts.len()));
         let _ = tx.send(Msg::LiveDone(Ok(Box::new(cap))));
@@ -584,4 +464,146 @@ pub(crate) fn spawn_rofl_enriched(tx: Sender<Msg>, path: String, game_id: u64) {
             warning,
         });
     });
+}
+
+/// Every few ticks: announce the `gameId` and, for replays, load the official
+/// timeline once and preview it right away.
+fn poll_session(
+    tx: &Sender<Msg>,
+    poller: &mut LivePoller,
+    announced_game_id: &mut Option<u64>,
+    replay_cache: &mut Option<(u64, lcu::LcuTimeline, Option<lcu::MatchSummary>)>,
+    lcu_mid: &mut Option<LcuClient>,
+) {
+    if let Some(session) = lcu::find_active_session() {
+        let id = session.game_id;
+        if *announced_game_id != Some(id) {
+            *announced_game_id = Some(id);
+            log_debug(&format!("spawn_live: new game_id detected = {id}"));
+            let _ = tx.send(Msg::LiveGameId(id));
+        }
+        // Replay: the official timeline already exists. It is loaded once and
+        // applied on every tick so the dashboard shows gold,
+        // objectives and Top 5 without waiting for the end.
+        if session.is_replay
+            && replay_cache.as_ref().map(|(i, ..)| *i) != Some(id)
+        {
+            if lcu_mid.is_none() {
+                *lcu_mid = LcuClient::connect().ok();
+            }
+            if let Some(client) = &*lcu_mid {
+                match client.get_timeline(id) {
+                    Ok(timeline) => {
+                        let summary = client.get_match_summary(id).ok();
+                        log_debug(&format!(
+                            "spawn_live: replay timeline {id} loaded live"
+                        ));
+                        *replay_cache = Some((id, timeline, summary));
+                        let _ = tx.send(Msg::LiveGameId(id));
+                        // Immediate preview: replay gold/objectives
+                        // right away, without waiting for the end.
+                        let mut preview = poller.build_capture();
+                        if let Some((pid, ptl, psum)) = &*replay_cache {
+                            apply_lcu_enrichment(
+                                &mut preview,
+                                *pid,
+                                ptl,
+                                psum.clone(),
+                                true,
+                            );
+                        }
+                        let _ = tx.send(Msg::LivePreview(Box::new(preview)));
+                    }
+                    Err(e) => {
+                        log_debug(&format!(
+                            "spawn_live: replay {id} has no timeline yet: {e}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Waits for the client to publish the timeline and enriches the final capture.
+fn enrich_final_capture(
+    cap: &mut ScrimCapture,
+    replay_cache: &Option<(u64, lcu::LcuTimeline, Option<lcu::MatchSummary>)>,
+    announced_game_id: Option<u64>,
+    session_start: SystemTime,
+) {
+// Wait for the client to finish writing the `.rofl`/`r3dlog` and for
+// the LCU to publish the timeline. In real games the timeline takes
+// a few seconds and the `r3dlog` may be locked while the game
+// is still open: that is why it is retried for ~40 s.
+std::thread::sleep(Duration::from_millis(1500));
+
+let mut enriquecida = false;
+if let Some((id, timeline, summary)) = &replay_cache {
+    apply_lcu_enrichment(cap, *id, timeline, summary.clone(), true);
+    enriquecida = true;
+}
+
+if !enriquecida {
+match LcuClient::connect() {
+    Err(e) => {
+        log_debug(&format!("spawn_live: LCU unavailable: {e}"));
+        cap.omisiones.push(i18n::trf(
+            "No se pudo conectar al LCU ({0}); el informe se queda con el score del modelo en vivo.",
+            &[&e.to_string()],
+        ));
+    }
+    Ok(lcu_client) => {
+        log_debug("spawn_live: LCU connected");
+        let mut vistos: Vec<u64> = Vec::new();
+        for attempt in 0..20 {
+            let candidates =
+                game_id_candidates(announced_game_id, session_start, attempt >= 10);
+            if candidates != vistos {
+                log_debug(&format!(
+                    "spawn_live: attempt {} candidates = {:?}",
+                    attempt + 1,
+                    candidates
+                ));
+                vistos = candidates.clone();
+            }
+            for id in &candidates {
+                match lcu_client.get_timeline(*id) {
+                    Ok(timeline) => {
+                        let summary = match lcu_client.get_match_summary(*id) {
+                            Ok(s) => Some(s),
+                            Err(e) => {
+                                log_debug(&format!(
+                                    "spawn_live: match summary {id} unavailable: {e}"
+                                ));
+                                None
+                            }
+                        };
+                        apply_lcu_enrichment(cap, *id, &timeline, summary, true);
+                        enriquecida = true;
+                        break;
+                    }
+                    Err(e) => {
+                        if attempt == 0 || attempt % 5 == 0 {
+                            log_debug(&format!(
+                                "spawn_live: get_timeline({id}) ERROR: {e}"
+                            ));
+                        }
+                    }
+                }
+            }
+            if enriquecida {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(2000));
+        }
+        if !enriquecida {
+            log_debug("spawn_live: no gameId produced a timeline after 40 s");
+            cap.omisiones.push(i18n::tr(
+                "Ningún gameId de esta sesión tiene timeline en el LCU; el informe se queda con el score del modelo en vivo.",
+            ));
+        }
+    }
+}
+}
 }
