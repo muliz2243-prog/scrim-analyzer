@@ -585,167 +585,163 @@ pub(crate) fn advantage_cards(
     vision_note: Option<&str>,
 ) {
     let (score, vb, vr) = accumulated_at(report, vision_blocks, cursor_s);
-    let total_w = vb + vr;
     let when = mmss(cursor_s);
     let is_lcu = report.fuente.contains("lcu");
+    let gold = gold_advantage_card(score, &when, is_lcu);
+    let vision = vision_advantage_card(vb, vr, &when, vision_totals);
 
     ui.columns(2, |cols| {
-        let (headline, detail, color, title) = if score > 0.05 {
-            (
-                i18n::tr("Ventaja a favor del AZUL"),
-                if is_lcu {
-                    i18n::trf(
-                        "{0} de oro hasta {1}",
-                        &[&format!("{score:+.0}g"), &when],
-                    )
-                } else {
-                    i18n::trf(
-                        "{0} puntos hasta {1}",
-                        &[&format!("{score:+.1}"), &when],
-                    )
-                },
-                BLUE,
-                if is_lcu {
-                    i18n::tr("VENTAJA DE ORO ACUMULADO")
-                } else {
-                    i18n::tr("SCORE ACUMULADO")
-                },
-            )
-        } else if score < -0.05 {
-            (
-                i18n::tr("Ventaja a favor del ROJO"),
-                if is_lcu {
-                    i18n::trf(
-                        "{0} de oro hasta {1}",
-                        &[&format!("{score:+.0}g"), &when],
-                    )
-                } else {
-                    i18n::trf(
-                        "{0} puntos hasta {1}",
-                        &[&format!("{score:+.1}"), &when],
-                    )
-                },
-                RED,
-                if is_lcu {
-                    i18n::tr("VENTAJA DE ORO ACUMULADO")
-                } else {
-                    i18n::tr("SCORE ACUMULADO")
-                },
-            )
-        } else {
-            (
-                i18n::tr(if is_lcu {
-                    "Empate en oro"
-                } else {
-                    "Empate en score"
-                }),
-                if is_lcu {
-                    i18n::trf("0g de diferencia acumulada hasta {0}", &[&when])
-                } else {
-                    i18n::trf("0.0 de diferencia acumulada hasta {0}", &[&when])
-                },
-                MUTED,
-                if is_lcu {
-                    i18n::tr("VENTAJA DE ORO ACUMULADO")
-                } else {
-                    i18n::tr("SCORE ACUMULADO")
-                },
-            )
-        };
         adv_card(
             &mut cols[0],
-            &i18n::trf("{0} HASTA {1}", &[&title, &when]),
-            &headline,
-            &detail,
-            color,
+            &i18n::trf("{0} HASTA {1}", &[&gold.3, &when]),
+            &gold.0,
+            &gold.1,
+            gold.2,
         );
 
-        let (headline, detail, color, titulo) = if total_w > 0.0 {
-            let diff = vb - vr;
-            let titulo = i18n::tr("VISIÓN ACUMULADA HASTA");
-            if diff.abs() < 1.0 {
-                (
-                    i18n::tr("Paridad de visión"),
-                    i18n::trf(
-                        "visión azul {0} · visión roja {1} hasta {2}",
-                        &[&format!("{vb:.0}"), &format!("{vr:.0}"), &when],
-                    ),
-                    TEAL,
-                    titulo,
-                )
-            } else if diff > 0.0 {
-                (
-                    i18n::tr("Visión a favor del AZUL"),
-                    i18n::trf(
-                        "visión azul {0} · visión roja {1}   ·   Δ +{2} a favor del AZUL",
-                        &[&format!("{vb:.0}"), &format!("{vr:.0}"), &format!("{diff:.0}")],
-                    ),
-                    BLUE,
-                    titulo,
-                )
-            } else {
-                (
-                    i18n::tr("Visión a favor del ROJO"),
-                    i18n::trf(
-                        "visión azul {0} · visión roja {1}   ·   Δ {2} a favor del ROJO",
-                        &[
-                            &format!("{vb:.0}"),
-                            &format!("{vr:.0}"),
-                            &format!("{:.0}", diff.abs()),
-                        ],
-                    ),
-                    RED,
-                    titulo,
-                )
-            }
-        } else if let Some((tb, tr, unidad)) = vision_totals.filter(|(b, r, _)| b + r > 0.0) {
-            let diff = tb - tr;
-            let color = if diff.abs() < 0.5 {
-                TEAL
-            } else if diff > 0.0 {
-                BLUE
-            } else {
-                RED
-            };
-            (
-                i18n::tr("Visión total de la partida"),
-                i18n::trf(
-                    "azul {0} · rojo {1} {2}   ·   Δ {3} a favor del {4} (sin desglose por ventana)",
-                    &[
-                        &format!("{tb:.0}"),
-                        &format!("{tr:.0}"),
-                        &unidad,
-                        &format!("{diff:+.0}"),
-                        &i18n::tr(if diff >= 0.0 { "AZUL" } else { "ROJO" }),
-                    ],
-                ),
-                color,
-                i18n::tr("VISIÓN TOTAL (SIN DESGLOSE TEMPORAL)"),
-            )
+        let titulo_card = if vision.3 == i18n::tr("VISIÓN TOTAL (SIN DESGLOSE TEMPORAL)") {
+            vision.3.to_string()
         } else {
-            (
-                i18n::tr("Sin datos de visión"),
-                i18n::tr("Esta captura no trae actividad de wards"),
-                MUTED,
-                i18n::tr("VISIÓN ACUMULADA HASTA"),
-            )
+            i18n::trf("{0} {1}", &[&vision.3, &when])
         };
-        let titulo_card = if titulo == i18n::tr("VISIÓN TOTAL (SIN DESGLOSE TEMPORAL)") {
-            titulo.to_string()
-        } else {
-            i18n::trf("{0} {1}", &[&titulo, &when])
-        };
-        adv_card(
-            &mut cols[1],
-            &titulo_card,
-            &headline,
-            &detail,
-            color,
-        );
+        adv_card(&mut cols[1], &titulo_card, &vision.0, &vision.1, vision.2);
         if let Some(note) = vision_note {
             cols[1].label(RichText::new(note).size(12.0).color(MUTED));
         }
     });
+}
+
+/// Headline, detail, color and title of the gold card.
+fn gold_advantage_card(score: f64, when: &str, is_lcu: bool) -> (String, String, Color32, String) {
+    if score > 0.05 {
+        (
+            i18n::tr("Ventaja a favor del AZUL"),
+            if is_lcu {
+                i18n::trf("{0} de oro hasta {1}", &[&format!("{score:+.0}g"), &when])
+            } else {
+                i18n::trf("{0} puntos hasta {1}", &[&format!("{score:+.1}"), &when])
+            },
+            BLUE,
+            if is_lcu {
+                i18n::tr("VENTAJA DE ORO ACUMULADO")
+            } else {
+                i18n::tr("SCORE ACUMULADO")
+            },
+        )
+    } else if score < -0.05 {
+        (
+            i18n::tr("Ventaja a favor del ROJO"),
+            if is_lcu {
+                i18n::trf("{0} de oro hasta {1}", &[&format!("{score:+.0}g"), &when])
+            } else {
+                i18n::trf("{0} puntos hasta {1}", &[&format!("{score:+.1}"), &when])
+            },
+            RED,
+            if is_lcu {
+                i18n::tr("VENTAJA DE ORO ACUMULADO")
+            } else {
+                i18n::tr("SCORE ACUMULADO")
+            },
+        )
+    } else {
+        (
+            i18n::tr(if is_lcu {
+                "Empate en oro"
+            } else {
+                "Empate en score"
+            }),
+            if is_lcu {
+                i18n::trf("0g de diferencia acumulada hasta {0}", &[&when])
+            } else {
+                i18n::trf("0.0 de diferencia acumulada hasta {0}", &[&when])
+            },
+            MUTED,
+            if is_lcu {
+                i18n::tr("VENTAJA DE ORO ACUMULADO")
+            } else {
+                i18n::tr("SCORE ACUMULADO")
+            },
+        )
+    }
+}
+
+/// Headline, detail, color and title of the vision card.
+fn vision_advantage_card(
+    vb: f64,
+    vr: f64,
+    when: &str,
+    vision_totals: Option<(f64, f64, String)>,
+) -> (String, String, Color32, String) {
+    if vb + vr > 0.0 {
+        let diff = vb - vr;
+        let titulo = i18n::tr("VISIÓN ACUMULADA HASTA");
+        if diff.abs() < 1.0 {
+            (
+                i18n::tr("Paridad de visión"),
+                i18n::trf(
+                    "visión azul {0} · visión roja {1} hasta {2}",
+                    &[&format!("{vb:.0}"), &format!("{vr:.0}"), &when],
+                ),
+                TEAL,
+                titulo,
+            )
+        } else if diff > 0.0 {
+            (
+                i18n::tr("Visión a favor del AZUL"),
+                i18n::trf(
+                    "visión azul {0} · visión roja {1}   ·   Δ +{2} a favor del AZUL",
+                    &[&format!("{vb:.0}"), &format!("{vr:.0}"), &format!("{diff:.0}")],
+                ),
+                BLUE,
+                titulo,
+            )
+        } else {
+            (
+                i18n::tr("Visión a favor del ROJO"),
+                i18n::trf(
+                    "visión azul {0} · visión roja {1}   ·   Δ {2} a favor del ROJO",
+                    &[
+                        &format!("{vb:.0}"),
+                        &format!("{vr:.0}"),
+                        &format!("{:.0}", diff.abs()),
+                    ],
+                ),
+                RED,
+                titulo,
+            )
+        }
+    } else if let Some((tb, tr, unidad)) = vision_totals.filter(|(b, r, _)| b + r > 0.0) {
+        let diff = tb - tr;
+        let color = if diff.abs() < 0.5 {
+            TEAL
+        } else if diff > 0.0 {
+            BLUE
+        } else {
+            RED
+        };
+        (
+            i18n::tr("Visión total de la partida"),
+            i18n::trf(
+                "azul {0} · rojo {1} {2}   ·   Δ {3} a favor del {4} (sin desglose por ventana)",
+                &[
+                    &format!("{tb:.0}"),
+                    &format!("{tr:.0}"),
+                    &unidad,
+                    &format!("{diff:+.0}"),
+                    &i18n::tr(if diff >= 0.0 { "AZUL" } else { "ROJO" }),
+                ],
+            ),
+            color,
+            i18n::tr("VISIÓN TOTAL (SIN DESGLOSE TEMPORAL)"),
+        )
+    } else {
+        (
+            i18n::tr("Sin datos de visión"),
+            i18n::tr("Esta captura no trae actividad de wards"),
+            MUTED,
+            i18n::tr("VISIÓN ACUMULADA HASTA"),
+        )
+    }
 }
 
 impl Linea {

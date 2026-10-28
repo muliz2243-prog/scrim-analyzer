@@ -79,14 +79,75 @@ pub(crate) fn time_slider(ui: &mut egui::Ui, cursor: &mut f32, dur: f32) -> bool
 ///
 /// `serie` are the points `(second, accumulated value)`. The vertical gold line
 /// marks the instant the user has selected with the time bar.
-pub(crate) fn accumulated_chart(
-    ui: &mut egui::Ui,
-    serie: &[(f32, f64)],
+/// Geometry shared by both accumulated charts: plot area, scale and the
+/// mapping from seconds / values to screen coordinates.
+struct ChartGeom {
+    plot: Rect,
+    mid: f32,
+    half: f32,
+    scale: f64,
     dur: f32,
-    height: f32,
-    cursor_s: Option<f32>,
-    unidad: &str,
-) {
+}
+
+impl ChartGeom {
+    fn new(rect: Rect, serie: &[(f32, f64)], dur: f32) -> Self {
+        let pad_l = 54.0;
+        let pad_r = 20.0;
+        let pad_t = 22.0;
+        let pad_b = 26.0;
+        let plot = Rect::from_min_max(
+            Pos2::new(rect.left() + pad_l, rect.top() + pad_t),
+            Pos2::new(rect.right() - pad_r, rect.bottom() - pad_b),
+        );
+        let mid = plot.center().y;
+        let half = (plot.height() * 0.5).max(1.0);
+
+        let dur = dur.max(serie.last().map(|p| p.0).unwrap_or(0.0)).max(1.0);
+        let max_abs = serie
+            .iter()
+            .map(|p| p.1.abs())
+            .fold(0.0f64, f64::max)
+            .max(500.0);
+        // Scale in "round" steps for gold (500, 1000, 2000, 5000…).
+        let step = {
+            let raw = max_abs / 2.0;
+            let pow = 10f64.powf(raw.log10().floor());
+            let m = raw / pow;
+            let nice = if m <= 1.0 {
+                1.0
+            } else if m <= 2.0 {
+                2.0
+            } else if m <= 5.0 {
+                5.0
+            } else {
+                10.0
+            };
+            // Snap to realistic gold steps
+            let base = nice * pow;
+            if base < 500.0 { 500.0 } else { base }
+        };
+        let scale = step * 2.0;
+
+        Self {
+            plot,
+            mid,
+            half,
+            scale,
+            dur,
+        }
+    }
+
+    fn x_of(&self, s: f32) -> f32 {
+        self.plot.left() + (s / self.dur).clamp(0.0, 1.0) * self.plot.width()
+    }
+
+    fn y_of(&self, v: f64) -> f32 {
+        self.mid - ((v / self.scale).clamp(-1.0, 1.0) as f32) * self.half
+    }
+}
+
+/// Reserves the chart area and paints its background and border.
+fn chart_canvas(ui: &mut egui::Ui, height: f32) -> (Rect, egui::Response, egui::Painter) {
     let width = ui.available_width().max(240.0);
     let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     let painter = ui.painter_at(rect);
@@ -97,65 +158,28 @@ pub(crate) fn accumulated_chart(
         Stroke::new(1.0, ACCENT.linear_multiply(0.55)),
         egui::StrokeKind::Inside,
     );
+    (rect, resp, painter)
+}
 
-    if serie.len() < 2 {
-        painter.text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            i18n::tr("Aún no hay ventanas medidas"),
-            egui::FontId::proportional(15.0),
-            MUTED,
-        );
-        return;
-    }
-
-    let pad_l = 54.0;
-    let pad_r = 20.0;
-    let pad_t = 22.0;
-    let pad_b = 26.0;
-    let plot = Rect::from_min_max(
-        Pos2::new(rect.left() + pad_l, rect.top() + pad_t),
-        Pos2::new(rect.right() - pad_r, rect.bottom() - pad_b),
+/// Notice shown while there are not enough measured windows.
+fn chart_empty(painter: &egui::Painter, rect: Rect) {
+    painter.text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        i18n::tr("Aún no hay ventanas medidas"),
+        egui::FontId::proportional(15.0),
+        MUTED,
     );
-    let mid = plot.center().y;
-    let half = (plot.height() * 0.5).max(1.0);
+}
 
-    let dur = dur.max(serie.last().map(|p| p.0).unwrap_or(0.0)).max(1.0);
-    let max_abs = serie
-        .iter()
-        .map(|p| p.1.abs())
-        .fold(0.0f64, f64::max)
-        .max(500.0);
-    // Scale in "round" steps for gold (500, 1000, 2000, 5000…).
-    let step = {
-        let raw = max_abs / 2.0;
-        let pow = 10f64.powf(raw.log10().floor());
-        let m = raw / pow;
-        let nice = if m <= 1.0 {
-            1.0
-        } else if m <= 2.0 {
-            2.0
-        } else if m <= 5.0 {
-            5.0
-        } else {
-            10.0
-        };
-        // Snap to realistic gold steps
-        let base = nice * pow;
-        if base < 500.0 { 500.0 } else { base }
-    };
-    let scale = step * 2.0;
-
-    let x_of = |s: f32| plot.left() + (s / dur).clamp(0.0, 1.0) * plot.width();
-    let y_of = |v: f64| mid - ((v / scale).clamp(-1.0, 1.0) as f32) * half;
-
-    // Horizontal grid: the tie line is gold (it is the reference).
+/// Horizontal grid: the tie line is gold (it is the reference).
+fn draw_hgrid(painter: &egui::Painter, g: &ChartGeom) {
     let grid = Stroke::new(1.0, ACCENT.linear_multiply(0.18));
     for f in [-1.0f64, -0.5, 0.0, 0.5, 1.0] {
-        let v = f * scale;
-        let y = y_of(v);
+        let v = f * g.scale;
+        let y = g.y_of(v);
         painter.line_segment(
-            [Pos2::new(plot.left(), y), Pos2::new(plot.right(), y)],
+            [Pos2::new(g.plot.left(), y), Pos2::new(g.plot.right(), y)],
             if f == 0.0 {
                 Stroke::new(1.6, GOLD.linear_multiply(0.75))
             } else {
@@ -163,17 +187,20 @@ pub(crate) fn accumulated_chart(
             },
         );
         painter.text(
-            Pos2::new(plot.left() - 8.0, y),
+            Pos2::new(g.plot.left() - 8.0, y),
             egui::Align2::RIGHT_CENTER,
             format!("{v:+.0}"),
             egui::FontId::proportional(12.0),
             if f == 0.0 { GOLD_BRIGHT } else { MUTED },
         );
     }
+}
 
-    // Vertical grid per minute.
-    let total_min = (dur / 60.0).ceil().max(1.0) as u32;
-    let label_every = if plot.width() / total_min as f32 >= 46.0 {
+/// Vertical grid, one line per minute.
+fn draw_vgrid(painter: &egui::Painter, g: &ChartGeom) {
+    let grid = Stroke::new(1.0, ACCENT.linear_multiply(0.18));
+    let total_min = (g.dur / 60.0).ceil().max(1.0) as u32;
+    let label_every = if g.plot.width() / total_min as f32 >= 46.0 {
         1
     } else if total_min <= 20 {
         2
@@ -181,14 +208,14 @@ pub(crate) fn accumulated_chart(
         5
     };
     for m in 0..=total_min {
-        let x = x_of(m as f32 * 60.0);
+        let x = g.x_of(m as f32 * 60.0);
         painter.line_segment(
-            [Pos2::new(x, plot.top()), Pos2::new(x, plot.bottom())],
+            [Pos2::new(x, g.plot.top()), Pos2::new(x, g.plot.bottom())],
             grid,
         );
         if m % label_every == 0 {
             painter.text(
-                Pos2::new(x, plot.bottom() + 4.0),
+                Pos2::new(x, g.plot.bottom() + 4.0),
                 egui::Align2::CENTER_TOP,
                 format!("{m}m"),
                 egui::FontId::proportional(12.0),
@@ -196,17 +223,19 @@ pub(crate) fn accumulated_chart(
             );
         }
     }
+}
 
-    // Blue fill above the tie, red below.
+/// Blue fill above the tie, red below.
+fn draw_fill(painter: &egui::Painter, g: &ChartGeom, serie: &[(f32, f64)]) {
     let fill = |a: (f32, f64), b: (f32, f64), color: Color32| {
-        let p0 = Pos2::new(x_of(a.0), y_of(a.1));
-        let p1 = Pos2::new(x_of(b.0), y_of(b.1));
+        let p0 = Pos2::new(g.x_of(a.0), g.y_of(a.1));
+        let p1 = Pos2::new(g.x_of(b.0), g.y_of(b.1));
         painter.add(egui::Shape::convex_polygon(
             vec![
-                Pos2::new(p0.x, mid),
+                Pos2::new(p0.x, g.mid),
                 p0,
                 p1,
-                Pos2::new(p1.x, mid),
+                Pos2::new(p1.x, g.mid),
             ],
             color,
             Stroke::NONE,
@@ -233,18 +262,22 @@ pub(crate) fn accumulated_chart(
             }
         }
     }
+}
 
-    // Series line.
+/// Series line on top of the fill.
+fn draw_series_line(painter: &egui::Painter, g: &ChartGeom, serie: &[(f32, f64)]) {
     let line: Vec<Pos2> = serie
         .iter()
-        .map(|p| Pos2::new(x_of(p.0), y_of(p.1)))
+        .map(|p| Pos2::new(g.x_of(p.0), g.y_of(p.1)))
         .collect();
     painter.add(egui::Shape::line(
         line,
         Stroke::new(2.0, GOLD_BRIGHT.linear_multiply(0.95)),
     ));
+}
 
-    // Team labels and current value.
+/// AZUL / ROJO labels on the left edge of the plot.
+fn draw_team_labels(painter: &egui::Painter, plot: Rect) {
     painter.text(
         Pos2::new(plot.left() + 6.0, plot.top() + 2.0),
         egui::Align2::LEFT_TOP,
@@ -259,6 +292,53 @@ pub(crate) fn accumulated_chart(
         egui::FontId::proportional(13.0),
         RED,
     );
+}
+
+/// Vertical line marking the instant chosen with the time bar.
+fn draw_cursor(painter: &egui::Painter, g: &ChartGeom, cursor_s: f32) {
+    let x = g.x_of(cursor_s);
+    painter.line_segment(
+        [Pos2::new(x, g.plot.top()), Pos2::new(x, g.plot.bottom())],
+        Stroke::new(1.8, GOLD_BRIGHT),
+    );
+    painter.circle_filled(Pos2::new(x, g.plot.top() + 3.0), 4.5, GOLD_BRIGHT);
+}
+
+/// Measured window closest to the horizontal position of the mouse.
+fn nearest_point(serie: &[(f32, f64)], g: &ChartGeom, x: f32) -> (f32, f64) {
+    let mut best = (0usize, f32::INFINITY);
+    for (i, p) in serie.iter().enumerate() {
+        let d = (g.x_of(p.0) - x).abs();
+        if d < best.1 {
+            best = (i, d);
+        }
+    }
+    serie[best.0]
+}
+
+pub(crate) fn accumulated_chart(
+    ui: &mut egui::Ui,
+    serie: &[(f32, f64)],
+    dur: f32,
+    height: f32,
+    cursor_s: Option<f32>,
+    unidad: &str,
+) {
+    let (rect, resp, painter) = chart_canvas(ui, height);
+
+    if serie.len() < 2 {
+        chart_empty(&painter, rect);
+        return;
+    }
+
+    let g = ChartGeom::new(rect, serie, dur);
+    draw_hgrid(&painter, &g);
+    draw_vgrid(&painter, &g);
+    draw_fill(&painter, &g, serie);
+    draw_series_line(&painter, &g, serie);
+
+    // Team labels and current value.
+    draw_team_labels(&painter, g.plot);
     let last = *serie.last().unwrap_or(&(0.0, 0.0));
     let (now_txt, now_col) = if last.1.abs() < 0.05 {
         (i18n::tr("EMPATE"), MUTED)
@@ -268,7 +348,7 @@ pub(crate) fn accumulated_chart(
         (format!("{:.1} · ROJO", last.1), RED)
     };
     painter.text(
-        Pos2::new(plot.right(), plot.top() + 2.0),
+        Pos2::new(g.plot.right(), g.plot.top() + 2.0),
         egui::Align2::RIGHT_TOP,
         now_txt,
         egui::FontId::proportional(14.0),
@@ -277,24 +357,12 @@ pub(crate) fn accumulated_chart(
 
     // Cursor: the instant selected with the time bar.
     if let Some(c) = cursor_s {
-        let x = x_of(c);
-        painter.line_segment(
-            [Pos2::new(x, plot.top()), Pos2::new(x, plot.bottom())],
-            Stroke::new(1.8, GOLD_BRIGHT),
-        );
-        painter.circle_filled(Pos2::new(x, plot.top() + 3.0), 4.5, GOLD_BRIGHT);
+        draw_cursor(&painter, &g, c);
     }
 
     if resp.hovered() {
         if let Some(pos) = resp.hover_pos() {
-            let mut best = (0usize, f32::INFINITY);
-            for (i, p) in serie.iter().enumerate() {
-                let d = (x_of(p.0) - pos.x).abs();
-                if d < best.1 {
-                    best = (i, d);
-                }
-            }
-            let p = serie[best.0];
+            let p = nearest_point(serie, &g, pos.x);
             let who = if p.1 > 0.05 {
                 i18n::tr("ventaja a favor del AZUL")
             } else if p.1 < -0.05 {
@@ -303,7 +371,7 @@ pub(crate) fn accumulated_chart(
                 i18n::tr("empate")
             };
             let c = if p.1 >= 0.0 { BLUE } else { RED };
-            let hover = Pos2::new(x_of(p.0), y_of(p.1));
+            let hover = Pos2::new(g.x_of(p.0), g.y_of(p.1));
             painter.circle_filled(hover, 4.0, c);
             painter.circle_stroke(hover, 4.0, Stroke::new(1.0, TEXT));
             let unit = i18n::tr(unidad);
@@ -328,180 +396,39 @@ pub(crate) fn score_chart(
     height: f32,
     cursor_s: f32,
 ) {
-    let width = ui.available_width().max(240.0);
-    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, egui::CornerRadius::same(8), INSET);
-    painter.rect_stroke(
-        rect,
-        egui::CornerRadius::same(8),
-        Stroke::new(1.0, ACCENT.linear_multiply(0.55)),
-        egui::StrokeKind::Inside,
-    );
+    let (rect, resp, painter) = chart_canvas(ui, height);
 
     let serie = score_series(report);
     if serie.len() < 2 {
-        painter.text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            i18n::tr("Aún no hay ventanas medidas"),
-            egui::FontId::proportional(15.0),
-            MUTED,
-        );
+        chart_empty(&painter, rect);
         return;
     }
 
-    let pad_l = 54.0;
-    let pad_r = 20.0;
-    let pad_t = 22.0;
-    let pad_b = 26.0;
-    let plot = Rect::from_min_max(
-        Pos2::new(rect.left() + pad_l, rect.top() + pad_t),
-        Pos2::new(rect.right() - pad_r, rect.bottom() - pad_b),
-    );
-    let mid = plot.center().y;
-    let half = (plot.height() * 0.5).max(1.0);
-
-    let dur = dur.max(serie.last().map(|p| p.0).unwrap_or(0.0)).max(1.0);
-    let max_abs = serie
-        .iter()
-        .map(|p| p.1.abs())
-        .fold(0.0f64, f64::max)
-        .max(500.0);
-    let step = {
-        let raw = max_abs / 2.0;
-        let pow = 10f64.powf(raw.log10().floor());
-        let m = raw / pow;
-        let nice = if m <= 1.0 {
-            1.0
-        } else if m <= 2.0 {
-            2.0
-        } else if m <= 5.0 {
-            5.0
-        } else {
-            10.0
-        };
-        let base = nice * pow;
-        if base < 500.0 { 500.0 } else { base }
-    };
-    let scale = step * 2.0;
-
-    let x_of = |s: f32| plot.left() + (s / dur).clamp(0.0, 1.0) * plot.width();
-    let y_of = |v: f64| mid - ((v / scale).clamp(-1.0, 1.0) as f32) * half;
-
-    // Horizontal grid
-    let grid = Stroke::new(1.0, ACCENT.linear_multiply(0.18));
-    for f in [-1.0f64, -0.5, 0.0, 0.5, 1.0] {
-        let v = f * scale;
-        let y = y_of(v);
-        painter.line_segment(
-            [Pos2::new(plot.left(), y), Pos2::new(plot.right(), y)],
-            if f == 0.0 {
-                Stroke::new(1.6, GOLD.linear_multiply(0.75))
-            } else {
-                grid
-            },
-        );
-        painter.text(
-            Pos2::new(plot.left() - 8.0, y),
-            egui::Align2::RIGHT_CENTER,
-            format!("{v:+.0}"),
-            egui::FontId::proportional(12.0),
-            if f == 0.0 { GOLD_BRIGHT } else { MUTED },
-        );
-    }
-
-    // Vertical grid
-    let total_min = (dur / 60.0).ceil().max(1.0) as u32;
-    let label_every = if plot.width() / total_min as f32 >= 46.0 {
-        1
-    } else if total_min <= 20 {
-        2
-    } else {
-        5
-    };
-    for m in 0..=total_min {
-        let x = x_of(m as f32 * 60.0);
-        painter.line_segment(
-            [Pos2::new(x, plot.top()), Pos2::new(x, plot.bottom())],
-            grid,
-        );
-        if m % label_every == 0 {
-            painter.text(
-                Pos2::new(x, plot.bottom() + 4.0),
-                egui::Align2::CENTER_TOP,
-                format!("{m}m"),
-                egui::FontId::proportional(12.0),
-                MUTED,
-            );
-        }
-    }
-
-    // Blue/red fill
-    let fill = |a: (f32, f64), b: (f32, f64), color: Color32| {
-        let p0 = Pos2::new(x_of(a.0), y_of(a.1));
-        let p1 = Pos2::new(x_of(b.0), y_of(b.1));
-        painter.add(egui::Shape::convex_polygon(
-            vec![
-                Pos2::new(p0.x, mid),
-                p0,
-                p1,
-                Pos2::new(p1.x, mid),
-            ],
-            color,
-            Stroke::NONE,
-        ));
-    };
-    let blue_fill = BLUE.linear_multiply(0.26);
-    let red_fill = RED.linear_multiply(0.26);
-    for w in serie.windows(2) {
-        let (a, b) = (w[0], w[1]);
-        if a.1 >= 0.0 && b.1 >= 0.0 {
-            fill(a, b, blue_fill);
-        } else if a.1 <= 0.0 && b.1 <= 0.0 {
-            fill(a, b, red_fill);
-        } else if (a.1 - b.1).abs() > f64::EPSILON {
-            let t = (a.1 / (a.1 - b.1)).abs();
-            let cross = (a.0 + (b.0 - a.0) * t as f32, 0.0);
-            if a.1 > 0.0 {
-                fill(a, cross, blue_fill);
-                fill(cross, b, red_fill);
-            } else {
-                fill(a, cross, red_fill);
-                fill(cross, b, blue_fill);
-            }
-        }
-    }
-
-    // Series line
-    let line: Vec<Pos2> = serie
-        .iter()
-        .map(|p| Pos2::new(x_of(p.0), y_of(p.1)))
-        .collect();
-    painter.add(egui::Shape::line(
-        line,
-        Stroke::new(2.0, GOLD_BRIGHT.linear_multiply(0.95)),
-    ));
+    let g = ChartGeom::new(rect, &serie, dur);
+    draw_hgrid(&painter, &g);
+    draw_vgrid(&painter, &g);
+    draw_fill(&painter, &g, &serie);
+    draw_series_line(&painter, &g, &serie);
 
     // Detection and drawing of EPIC OBJECTIVES as exact breaks in the chart
     for o in &report.avisos {
-        let ox = x_of(o.start_s);
+        let ox = g.x_of(o.start_s);
         let obj_col = team_color(o.team);
         // Subtle vertical line with a gradient (more transparent in the center)
-        let mid_y = plot.center().y;
-        let half_h = plot.height() * 0.5;
+        let mid_y = g.plot.center().y;
+        let half_h = g.plot.height() * 0.5;
         // Top part
         painter.line_segment(
-            [Pos2::new(ox, plot.top()), Pos2::new(ox, mid_y - half_h * 0.3)],
+            [Pos2::new(ox, g.plot.top()), Pos2::new(ox, mid_y - half_h * 0.3)],
             Stroke::new(1.0, obj_col.linear_multiply(0.4)),
         );
         // Bottom part
         painter.line_segment(
-            [Pos2::new(ox, mid_y + half_h * 0.3), Pos2::new(ox, plot.bottom())],
+            [Pos2::new(ox, mid_y + half_h * 0.3), Pos2::new(ox, g.plot.bottom())],
             Stroke::new(1.0, obj_col.linear_multiply(0.4)),
         );
         // Distinctive badge with the initial
-        let badge_y = if o.team == Team::Blue { plot.top() + 10.0 } else { plot.bottom() - 10.0 };
+        let badge_y = if o.team == Team::Blue { g.plot.top() + 10.0 } else { g.plot.bottom() - 10.0 };
         painter.circle_filled(Pos2::new(ox, badge_y), 7.0, obj_col);
         painter.circle_stroke(Pos2::new(ox, badge_y), 7.0, Stroke::new(1.5, TEXT));
         let badge_char = match o.tipo.as_str() {
@@ -521,39 +448,14 @@ pub(crate) fn score_chart(
     }
 
     // BLUE / RED labels
-    painter.text(
-        Pos2::new(plot.left() + 6.0, plot.top() + 2.0),
-        egui::Align2::LEFT_TOP,
-        i18n::tr("AZUL"),
-        egui::FontId::proportional(13.0),
-        BLUE,
-    );
-    painter.text(
-        Pos2::new(plot.left() + 6.0, plot.bottom() - 2.0),
-        egui::Align2::LEFT_BOTTOM,
-        i18n::tr("ROJO"),
-        egui::FontId::proportional(13.0),
-        RED,
-    );
+    draw_team_labels(&painter, g.plot);
 
     // Cursor
-    let cx = x_of(cursor_s);
-    painter.line_segment(
-        [Pos2::new(cx, plot.top()), Pos2::new(cx, plot.bottom())],
-        Stroke::new(1.8, GOLD_BRIGHT),
-    );
-    painter.circle_filled(Pos2::new(cx, plot.top() + 3.0), 4.5, GOLD_BRIGHT);
+    draw_cursor(&painter, &g, cursor_s);
 
     if resp.hovered() {
         if let Some(pos) = resp.hover_pos() {
-            let mut best = (0usize, f32::INFINITY);
-            for (i, p) in serie.iter().enumerate() {
-                let d = (x_of(p.0) - pos.x).abs();
-                if d < best.1 {
-                    best = (i, d);
-                }
-            }
-            let p = serie[best.0];
+            let p = nearest_point(&serie, &g, pos.x);
             let who = if p.1 > 0.05 {
                 i18n::tr("ventaja a favor del AZUL")
             } else if p.1 < -0.05 {
@@ -562,12 +464,12 @@ pub(crate) fn score_chart(
                 i18n::tr("empate")
             };
             let c = if p.1 >= 0.0 { BLUE } else { RED };
-            let hover = Pos2::new(x_of(p.0), y_of(p.1));
+            let hover = Pos2::new(g.x_of(p.0), g.y_of(p.1));
             painter.circle_filled(hover, 4.0, c);
             painter.circle_stroke(hover, 4.0, Stroke::new(1.0, TEXT));
 
             // Tooltip if hovering over an epic objective
-            let near_obj = report.avisos.iter().find(|o| (x_of(o.start_s) - pos.x).abs() <= 6.0);
+            let near_obj = report.avisos.iter().find(|o| (g.x_of(o.start_s) - pos.x).abs() <= 6.0);
             let is_lcu = report.fuente.contains("lcu");
             if let Some(o) = near_obj {
                 if is_lcu {

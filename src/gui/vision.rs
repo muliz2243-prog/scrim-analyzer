@@ -426,13 +426,46 @@ pub(crate) fn vision_dashboard(ui: &mut egui::Ui, vision_blocks: &[ScrimBlock], 
 }
 
 /// BLUE vs RED comparison table of what generated the gold in the window.
+/// Aggregated rows of the breakdown table: `(blue, red, available)` per category.
+type BreakdownMap = std::collections::BTreeMap<&'static str, (f64, f64, bool)>;
+
 pub(crate) fn alert_breakdown_table(ui: &mut egui::Ui, block: &DominionBlock, es_oro: bool, show_diff: bool) {
-    use std::collections::BTreeMap;
     let extra_label = if es_oro {
         "Oro extra (wards, placas no detectadas, pasivo…)"
     } else {
         "Oro extra (no detectado)"
     };
+    let mut map = breakdown_rows(block, extra_label);
+    let filas: Vec<&str> = if es_oro {
+        vec![
+            "Kills",
+            "Torres",
+            "Objetivos neutrales",
+            "Súbditos",
+            "Monstruos de jungla",
+            extra_label,
+        ]
+    } else {
+        vec![
+            "Kills",
+            "Torres",
+            "Objetivos neutrales",
+            "Súbditos / jungla / resto",
+            extra_label,
+        ]
+    };
+    for k in &filas {
+        map.entry(k).or_insert((0.0, 0.0, false));
+    }
+
+    let unidad = if es_oro { "g" } else { "pts" };
+    breakdown_grid(ui, block.index, &filas, &map, unidad, es_oro, show_diff);
+    breakdown_footer(ui, &map, unidad, show_diff);
+}
+
+/// Adds up the axes of the block into the table categories.
+fn breakdown_rows(block: &DominionBlock, extra_label: &'static str) -> BreakdownMap {
+    use std::collections::BTreeMap;
     let mut map: BTreeMap<&'static str, (f64, f64, bool)> = BTreeMap::new();
     let mut add = |k: &'static str, b: f64, r: f64, av: bool| {
         let e = map.entry(k).or_insert((0.0, 0.0, false));
@@ -462,29 +495,19 @@ pub(crate) fn alert_breakdown_table(ui: &mut egui::Ui, block: &DominionBlock, es
             _ => {}
         }
     }
-    let filas: Vec<&str> = if es_oro {
-        vec![
-            "Kills",
-            "Torres",
-            "Objetivos neutrales",
-            "Súbditos",
-            "Monstruos de jungla",
-            extra_label,
-        ]
-    } else {
-        vec![
-            "Kills",
-            "Torres",
-            "Objetivos neutrales",
-            "Súbditos / jungla / resto",
-            extra_label,
-        ]
-    };
-    for k in &filas {
-        map.entry(k).or_insert((0.0, 0.0, false));
-    }
+    map
+}
 
-    let unidad = if es_oro { "g" } else { "pts" };
+/// The table itself, with the window total as the last row.
+fn breakdown_grid(
+    ui: &mut egui::Ui,
+    block_index: u32,
+    filas: &[&str],
+    map: &BreakdownMap,
+    unidad: &str,
+    es_oro: bool,
+    show_diff: bool,
+) {
     let fmt = |v: f64| -> String {
         if es_oro {
             format!("{v:+.0}g")
@@ -493,7 +516,7 @@ pub(crate) fn alert_breakdown_table(ui: &mut egui::Ui, block: &DominionBlock, es
         }
     };
 
-    egui::Grid::new(format!("breakdown_{}_{}", block.index, show_diff))
+    egui::Grid::new(format!("breakdown_{}_{}", block_index, show_diff))
         .num_columns(if show_diff { 4 } else { 3 })
         .spacing([8.0, 3.0])
         .striped(true)
@@ -511,7 +534,7 @@ pub(crate) fn alert_breakdown_table(ui: &mut egui::Ui, block: &DominionBlock, es
                 );
             }
             ui.end_row();
-            for k in &filas {
+            for k in filas {
                 let (b, r, _av) = map.get(k).copied().unwrap_or((0.0, 0.0, false));
                 ui.label(RichText::new(i18n::tr(k)).size(11.5).color(TEXT));
                 ui.label(RichText::new(fmt(b)).size(11.5).color(BLUE));
@@ -559,6 +582,10 @@ pub(crate) fn alert_breakdown_table(ui: &mut egui::Ui, block: &DominionBlock, es
             }
             ui.end_row();
         });
+}
+
+/// Total of both teams and the note that explains what "extra gold" is.
+fn breakdown_footer(ui: &mut egui::Ui, map: &BreakdownMap, unidad: &str, show_diff: bool) {
     if !show_diff {
         ui.label(
             RichText::new(i18n::trf(
