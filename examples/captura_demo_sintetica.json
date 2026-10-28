@@ -1,0 +1,46 @@
+{
+  "_aviso": "CAPTURA SINTÉTICA DE DEMOSTRACIÓN — NO son datos reales de ninguna partida. Existe para verificar el pipeline completo (--recalc) con los cinco ejes del score (kills, torres, placas, objetivos, CS) y el módulo de visión activos a la vez. Los ejemplos reales viven en validacion_scrim.json (captura en vivo) y salida_moderno.json (replay .rofl).",
+  "fuente": "SINTETICA_DEMO",
+  "endpoint": "n/a (demo)",
+  "reconstruido_por_modelo": false,
+  "game_mode": "CLASSIC",
+  "map_name": "Map11",
+  "duration_s": 300.0,
+  "poll_count": 300,
+  "poll_interval_ms": 1000,
+  "parametros": {
+    "avg_cs_gold": 19.0,
+    "kill_gold": 300.0,
+    "assist_gold": 150.0,
+    "passive_gold_per_min": 204.0
+  },
+  "omisiones": [
+    "Demo sintética: los datos de CS/wards por ventana son inventados a propósito para ejercitar el pipeline; no los uses como referencia de precisión.",
+    "Placas: las 3 capturas en vivo observadas no contienen eventos con 'Plate' en el nombre; en la demo el eje de placas queda disponible (comparte el gate de estructuras con las torres) con neto 0."
+  ],
+  "players": [],
+  "blocks": [
+    { "index": 0, "start_s": 0.0, "end_s": 30.0, "cs_blue_delta": 22, "cs_red_delta": 20, "ward_blue_delta": 1.2, "ward_red_delta": 1.1 },
+    { "index": 1, "start_s": 30.0, "end_s": 60.0, "cs_blue_delta": 25, "cs_red_delta": 24, "ward_blue_delta": 1.4, "ward_red_delta": 1.5 },
+    { "index": 2, "start_s": 60.0, "end_s": 90.0, "cs_blue_delta": 24, "cs_red_delta": 26, "ward_blue_delta": 1.3, "ward_red_delta": 1.4 },
+    { "index": 3, "start_s": 90.0, "end_s": 120.0, "cs_blue_delta": 27, "cs_red_delta": 25, "ward_blue_delta": 1.5, "ward_red_delta": 1.3 },
+    { "index": 4, "start_s": 120.0, "end_s": 150.0, "cs_blue_delta": 30, "cs_red_delta": 22, "ward_blue_delta": 2.0, "ward_red_delta": 1.0, "towers_blue": 1, "objectives_blue": 1 },
+    { "index": 5, "start_s": 150.0, "end_s": 180.0, "cs_blue_delta": 18, "cs_red_delta": 32, "ward_blue_delta": 1.0, "ward_red_delta": 2.2, "objectives_red": 1 },
+    { "index": 6, "start_s": 180.0, "end_s": 210.0, "cs_blue_delta": 26, "cs_red_delta": 25, "ward_blue_delta": 4.5, "ward_red_delta": 0.5 },
+    { "index": 7, "start_s": 210.0, "end_s": 240.0, "cs_blue_delta": 24, "cs_red_delta": 28, "ward_blue_delta": 1.2, "ward_red_delta": 1.6 },
+    { "index": 8, "start_s": 240.0, "end_s": 270.0, "cs_blue_delta": 25, "cs_red_delta": 26, "ward_blue_delta": 1.3, "ward_red_delta": 1.4 },
+    { "index": 9, "start_s": 270.0, "end_s": 300.0, "cs_blue_delta": 23, "cs_red_delta": 30, "ward_blue_delta": 1.1, "ward_red_delta": 2.0 }
+  ],
+  "events": [
+    { "t_game_s": 128.5, "kind": "ChampionKill", "team": "blue", "killer": "TopAzul", "victim": "JunglaRojo", "victim_team": "red", "assister_count": 1 },
+    { "t_game_s": 134.2, "kind": "ChampionKill", "team": "blue", "killer": "MidAzul", "victim": "MidRojo", "victim_team": "red", "assister_count": 2 },
+    { "t_game_s": 141.0, "kind": "DragonKill", "team": "blue", "killer": "JunglaAzul", "monster": "Chemtech" },
+    { "t_game_s": 146.7, "kind": "TurretKilled", "team": "blue", "killer": "TopAzul", "turret": "Turret_TOrder_L1_P3_0" },
+    { "t_game_s": 152.0, "kind": "ChampionKill", "team": "red", "killer": "TopRojo", "victim": "TopAzul", "victim_team": "blue", "assister_count": 2 },
+    { "t_game_s": 155.3, "kind": "ChampionKill", "team": "red", "killer": "JunglaRojo", "victim": "JunglaAzul", "victim_team": "blue", "assister_count": 1 },
+    { "t_game_s": 158.9, "kind": "ChampionKill", "team": "red", "killer": "MidRojo", "victim": "MidAzul", "victim_team": "blue", "assister_count": 3 },
+    { "t_game_s": 171.4, "kind": "BaronKill", "team": "red", "killer": "JunglaRojo", "monster": "Baron" }
+  ],
+  "top5_azul": { "exitos": [], "desastres": [] },
+  "top5_rojo": { "exitos": [], "desastres": [] }
+}

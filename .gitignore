@@ -1,0 +1,38 @@
+# Rust build output
+/target
+/dist
+
+# Private / internal notes (never published)
+/detalles criticos del proyecto/
+
+# Study material, not part of the project
+/ROFL-master/
+/ROFLPlayer/
+
+# Local captures, logs and configuration
+/capturas/
+debug.log
+config.json
+*.rofl
+
+# Screenshot sources (only docs/screenshots is published)
+/imagenes proyecto/
+
+# Root-level scratch files
+/*.json
+/*.txt
+/*.log
+/*.ps1
+
+# Editor / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# Keys and certificates
+/firma
+*.pfx
+*.p12
+*.pem
+*.key

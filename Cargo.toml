@@ -1,0 +1,70 @@
+[package]
+name = "rofl-analyzer"
+version = "1.0.0"
+edition = "2021"
+description = "Live League of Legends scrim analyzer: 30-second window score and vision"
+license = "MIT"
+build = "build.rs"
+
+[dependencies]
+# zlib decompression for payload chunks (miniz_oxide backend, 100% Rust)
+flate2 = "1.0"
+# Serialization / deserialization of JSON metadata and results
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Idiomatic error handling (thiserror)
+thiserror = "2.0"
+# Zstandard decompression (modern replays use zstd, not zlib) — 100% Rust
+ruzstd = "0.8"
+# **Native** HTTPS client for the local League client API: replaces the
+# `curl -k` child process (a pattern that triggers antivirus software). TLS with
+# rustls and the client certificate **pinned** in memory.
+reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
+    "rustls-tls",
+    "charset",
+] }
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+] }
+# Local graphical interface (`scrim-analyzer` binary): native egui/eframe + dialogs
+eframe = { version = "0.37.0", optional = true }
+rfd = { version = "0.17.2", optional = true }
+
+[dev-dependencies]
+# Only for generating the multi-resolution icon and the window RGBA
+image = "0.25"
+# Ephemeral self-signed certificate for testing the local HTTPS client
+rcgen = "0.14"
+
+[features]
+# Local graphical interface. The base CLI does not need it:
+#   cargo build --release --features gui  →  target\release\scrim-analyzer.exe
+gui = ["dep:eframe", "dep:rfd"]
+
+[[bin]]
+name = "scrim-analyzer"
+path = "src/gui_main.rs"
+required-features = ["gui"]
+
+[profile.dev]
+opt-level = 0
+# Fewer symbols than the default `debug = 2`: compiles and links much faster.
+debug = 1
+incremental = true
+
+[profile.release]
+opt-level = 3
+# No LTO with parallel codegen: release builds take minutes to tens of seconds.
+# For the maximum final binary, use `--profile dist`.
+lto = false
+codegen-units = 16
+strip = true
+
+# Distribution profile: maximum optimization (slower to compile).
+[profile.dist]
+inherits = "release"
+lto = "thin"
+codegen-units = 1
