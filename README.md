@@ -190,7 +190,7 @@ is a position invented):
 | `statsJson` | Ward totals | **Only scalar totals**: 74 placed / 9 destroyed, per player and team (`WARD_PLACED`, `WARD_KILLED`). No coordinates or timestamps. |
 
 **Consequence**: in modern `.rofl` **spatial vision is left documented as
-omitted**. The score's vision axis (V) uses the *per-player totals*
+omitted**. The vision axis (V) uses the *per-player totals*
 from `statsJson` (measured), not the spatial distribution. The `legacy` fallback
 (`payload.rs`) **does** extract `WardPlaced{x,y}` and `WardKill{x,y}` with
 coordinates, but without an owner.
@@ -206,7 +206,7 @@ coordinates, but without an owner.
 **For the coach**: *spatial vision with champion faces* only exists in legacy
 replays. In live scrims and modern replays one must settle for the
 **vision activity aggregated per player** (`wardScore` / totals), which do
-feed the score's V axis without fabricating anything.
+feed the vision axis (V) without fabricating anything.
 
 ## Structure
 
@@ -223,7 +223,7 @@ src/
   payload.rs  Legacy payload walk: frames (type 3) and events (type 4)
   live.rs     Live collector (Live Client Data API) → 30 s blocks
   tls.rs      Native HTTPS client with the client certificate PINNED
-  score.rs    Dominion score by 30 s windows + breakpoints + vision module
+  score.rs    Legacy name: 30 s gold blocks, breakpoints and vision module
   blocks.rs   Fixed 30 s blocks with per-team gold delta and Top 5
   cursor.rs   Zero-copy little-endian binary reader, no unsafe
   model.rs    Lightweight serde structs (Replay, FrameSnapshot, Event...)
@@ -244,13 +244,17 @@ examples/
   captura_demo_sintetica.json  --recalc demo with the 5 axes + vision (NOT real data)
 ```
 
-## Dominion score, severities and vision module (`src/score.rs`)
+## Real gold, severities and vision module (`src/score.rs`)
 
-`--scrim` mode aggregates the game into **30 s windows** (`[0,30)`,
-`[30,60)`, …). The GUI's final report uses the **real gold from the LCU
-timeline** (`participantFrames[].totalGold`): there are no abstract points. When the LCU
-is unavailable (e.g. an old capture or the dashboard while playing),
-the fallback score model is used, exported and calibratable (`ScoreParams`):
+The metric is **real gold, not points**. The GUI captures the official match
+timeline from the local League client and reads each team's net gold from
+`participantFrames[].totalGold`; the report aggregates it into **30 s
+windows** (`[0,30)`, `[30,60)`, …). If the timeline is available, the numbers
+are the game's own gold: nothing is estimated.
+
+Only when the LCU timeline is unavailable (an old capture, or a `.rofl`
+whose `gameId` returns 404) does the app fall back to a points model,
+exported and calibratable (`ScoreParams`):
 
 | Action | Gold equivalence (fallback) |
 |---|---|
@@ -270,7 +274,7 @@ exceed the measured gold they are scaled, gold is never invented.
 
 Axes without real data — no turret/objective events in the whole scrim, or
 no CS activity measured in any window — are marked `available: false`
-(contribution 0, **documented**, never an invented zero that dilutes the score).
+(contribution 0, **documented**, never an invented zero that dilutes the gold advantage).
 
 ### Severity of each window (where the game broke)
 
@@ -286,18 +290,18 @@ calibratable (`SeverityThresholds`):
 
 An isolated kill (~300 g) stays **below the floor**: it is noise, not a moment.
 
-The score is **permanent**: the same advantage is worth the same at minute 4 as
-at 25, so two games compare directly.
+The gold advantage is **permanent**: the same advantage is worth the same at
+minute 4 as at 25, so two games compare directly.
 
-**Epic monster buffs do NOT add to the score** (they are temporary and
-would dirty the curve): they are reported separately in `dominion.avisos` («BLUE took
-the baron at 03:20, buff until 06:50») so that the analyst can match them with the
-later score rises.
+**Epic monster buffs do NOT add to the gold advantage** (they are temporary
+and would dirty the curve): they are reported separately in `dominion.avisos`
+(«BLUE took the baron at 03:20, buff until 06:50») so that the analyst can
+match them with the later gold rises.
 
 Windows above the floor are listed in `dominion.breakpoints`, **each
 block separately and without merging**: two consecutive alerted windows are two
 independent decisions (two mistakes in a row ≠ a snowball) and both
-notices are kept. Each alert carries **the outcome** (the window's score, with its sign)
+notices are kept. Each alert carries **the outcome** (the window's net gold, with its sign)
 and the level. The **Top 5 successes and disasters per team never uses a
 threshold**: it always comes out complete.
 
@@ -315,12 +319,12 @@ expose dragons, heralds or barons through any channel**:
 | LCU (`/lol-gameflow/...`) | ❌ |
 
 That is why the report **does not mention them**: there is no measured data to show
-and nothing is invented. The score keeps to what is actually measured live,
+and nothing is invented. The report keeps to what is actually measured live,
 with team and minute: **kills, turrets, plates, inhibitors and CS**.
 
 
 
-### Vision module (independent of the score)
+### Vision module (independent of gold)
 
 Vision is measured in **1-minute windows** (2 blocks of 30 s): in 30 s a
 team places 1–2 wards and the distribution is noise. The **shrunk share**
@@ -329,16 +333,16 @@ team places 1–2 wards and the distribution is noise. The **shrunk share**
 a sampling artifact) and a minimum activity of **4 wards** in the
 window is required: below that, nothing is asserted.
 
-The cuts are the same four levels as the score: `|deviation|` ≥ 0.08 →
+The cuts are the same four levels as gold: `|deviation|` ≥ 0.08 →
 slight advantage, ≥ 0.12 → moderate, ≥ 0.16 → strong, ≥ 0.20 → critical. The
 alerts are labeled **«blue vision N · red vision M»** plus the differential
 (`Δ X in favor of the team`), never with a "blue share" percentage (which
 read as map control).
 
 The **epic objectives** (dragon/herald/baron) appear **interleaved in the
-chronological list of alerts**, with a `◆`: they neither add nor subtract score (their buff
+chronological list of alerts**, with a `◆`: they neither add nor subtract gold (their buff
 is temporary and expires), but they are the datum that explains the later
-score rises.
+gold rises.
 
 **Measured fallback**: in some sessions the client serves `scores` at zero
 (observed in spectator mode: CS, kills and `wardScore` all at 0). In that
@@ -387,8 +391,8 @@ other more recent ones have been seen and must be compared against all
 known instants, not against the last one.
 
 **Effect of the fixed bug**: without that deduplication, one kill counted up to 4
-times and a window of "2 kills" scored 39 pts instead of 7.8 (that is why
-everything came out «critical»).
+times and, in the fallback points model, a window of "2 kills" scored 39 pts
+instead of 7.8 (that is why everything came out «critical»).
 
 Also, Riot **omits the occasional event in some polls**. Verified by cross-checking
 `LA1-1755257919.rofl` (51 kills, `statsJson` ground truth) with three independent
@@ -399,8 +403,8 @@ snapshot: if the feed accumulates fewer than `scores`, the discrepancy is publis
 in `omisiones` with both counts — an incomplete window is never
 silenced. In the recalculation of that capture: 49/49 deduplicated kills
 match the `.rofl` timestamps (0 false merges) and the 2
-lost ones are 1 per team in the same window, so **no score**
-suffers.
+lost ones are 1 per team in the same window, so **no window**
+is distorted.
 
 ## How the local API is read (native HTTPS client, `src/tls.rs`)
 
@@ -524,7 +528,7 @@ replay loads no longer ends the capture.
 The report shows, in this order:
 
 1. a **criticality legend** explaining what each level means, with its threshold
-   in gold (score and vision);
+   in gold and in vision units;
 2. a **time bar**: pick the minute of the game and everything below is read
    **up to that instant**;
 3. the **cumulative gold chart**, with a golden line marking the chosen instant;
@@ -560,7 +564,7 @@ theme by default, so the app forces it to dark on startup.
 
 The **live dashboard** refreshes itself every second (without touching anything) and
 shows chips for kills, CS, turrets, objectives and **vision** per team, the timeline
-bar, the two cumulative advantage charts (score and vision) and the most recent
+bar, the two cumulative advantage charts (gold and vision) and the most recent
 alerts in two columns. The screen you navigate to stays: when you
 press «Detect live game» you stay on it even if you do not move the mouse, and
 as soon as there is data it appears. If you leave with «⌂ Home» mid-capture, the
@@ -604,7 +608,7 @@ cargo test --release
 # 4) Fine sampling (1 frame every 200 ms) and payload dump for debugging
 .\target\release\rofl-analyzer.exe "partida.rofl" -s 200 --dump-payload payload.bin
 
-# 5) Recalculate score/breakpoints/vision from a saved scrim capture
+# 5) Recalculate gold/breakpoints/vision from a saved scrim capture
 #    (deduplicates the feed and rebuilds the windows; for calibrating thresholds)
 .\target\release\rofl-analyzer.exe --recalc validacion_scrim.json --json recalculo.json
 
