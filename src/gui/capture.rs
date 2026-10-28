@@ -35,6 +35,41 @@ pub(crate) fn apply_lcu_enrichment(
     cap.dominion.top5_rojo = top5_r;
 
     // 3. Vision per window from WARD_PLACED (if the timeline provides it).
+    let vision_blocks = vision_blocks_from_wards(&ward_evs, dur);
+    merge_vision_series(cap, vision_blocks);
+
+    // Measured totals for the whole game from /games/{id}: fallback when there
+    // is no temporal breakdown (e.g. a replay opened directly from .rofl).
+    if let Some(summary) = summary {
+        apply_match_summary(cap, summary);
+    }
+
+    // 4. Exact epic objectives → chart alerts.
+    let objs = timeline.objective_events();
+    cap.dominion.avisos = objective_alerts(&objs);
+
+    if set_duration {
+        cap.duration_s = dur;
+    }
+    cap.game_id = Some(game_id);
+    cap.dominion.fuente = "lcu_timeline_oro_real".to_string();
+    cap.dominion.vision = score::compute_vision(&cap.blocks, VisionThresholds::default());
+    cap.omisiones
+        .push(i18n::trf("Partida enlazada por r3dlog: gameId {0}", &[&game_id.to_string()]));
+    log_debug(&format!(
+        "enrich: breakpoints={}, vision_blocks={}, vision_alerts={}, avisos={}",
+        cap.dominion.breakpoints.len(),
+        cap.blocks.len(),
+        cap.dominion.vision.alerts.len(),
+        cap.dominion.avisos.len()
+    ));
+}
+
+/// 30 s vision blocks built from the WARD_PLACED events of the timeline.
+fn vision_blocks_from_wards(
+    ward_evs: &[(f32, String, i32, i32, i32, Option<i32>)],
+    dur: f32,
+) -> Vec<ScrimBlock> {
     let n_blocks = (dur.max(1.0) / 30.0).ceil() as u32;
     let mut vision_blocks: Vec<ScrimBlock> = (0..n_blocks)
         .map(|i| ScrimBlock {
@@ -45,7 +80,7 @@ pub(crate) fn apply_lcu_enrichment(
             ..Default::default()
         })
         .collect();
-    for (t, _wtype, _x, _y, creator_id, team_id) in &ward_evs {
+    for (t, _wtype, _x, _y, creator_id, team_id) in ward_evs {
         let idx_f = (*t / 30.0).floor();
         if idx_f < 0.0 {
             continue;
@@ -60,6 +95,12 @@ pub(crate) fn apply_lcu_enrichment(
             _ => {}
         }
     }
+    vision_blocks
+}
+
+/// Picks the vision series to keep: the poller `wardScore` wins, then the
+/// timeline wards, then whatever the poller already measured.
+fn merge_vision_series(cap: &mut ScrimCapture, vision_blocks: Vec<ScrimBlock>) {
     let total_wards_atribuidos: f64 = vision_blocks
         .iter()
         .map(|b| b.ward_blue_delta + b.ward_red_delta)
@@ -88,30 +129,33 @@ pub(crate) fn apply_lcu_enrichment(
             "El timeline del LCU no incluye eventos WARD_PLACED en esta partida; la visión por ventana usa el wardScore/wards del Live Client Data (si lo hubo).",
         ));
     }
-    // Measured totals for the whole game from /games/{id}: fallback when there
-    // is no temporal breakdown (e.g. a replay opened directly from .rofl).
-    if let Some(summary) = summary {
-        if summary.vision.total() > 0 {
-            cap.vision_totals = Some(VisionTotals {
-                blue: summary.vision.blue,
-                red: summary.vision.red,
-            });
-            cap.omisiones.push(i18n::trf(
-                "Visión total medida por el cliente: {0} wards azules · {1} rojas (sin desglose por minuto).",
-                &[&summary.vision.blue.to_string(), &summary.vision.red.to_string()],
-            ));
-        }
-        if !summary.game_mode.is_empty() && summary.game_mode != "?" {
-            cap.game_mode = summary.game_mode;
-        }
-        if !summary.map_name.is_empty() && summary.map_name != "?" {
-            cap.map_name = summary.map_name;
-        }
-    }
+}
 
-    // 4. Exact epic objectives → chart alerts.
-    let objs = timeline.objective_events();
-    cap.dominion.avisos.clear();
+/// Totals, game mode and map measured by the client for the whole game.
+fn apply_match_summary(cap: &mut ScrimCapture, summary: lcu::MatchSummary) {
+    if summary.vision.total() > 0 {
+        cap.vision_totals = Some(VisionTotals {
+            blue: summary.vision.blue,
+            red: summary.vision.red,
+        });
+        cap.omisiones.push(i18n::trf(
+            "Visión total medida por el cliente: {0} wards azules · {1} rojas (sin desglose por minuto).",
+            &[&summary.vision.blue.to_string(), &summary.vision.red.to_string()],
+        ));
+    }
+    if !summary.game_mode.is_empty() && summary.game_mode != "?" {
+        cap.game_mode = summary.game_mode;
+    }
+    if !summary.map_name.is_empty() && summary.map_name != "?" {
+        cap.map_name = summary.map_name;
+    }
+}
+
+/// Epic objectives of the timeline as chart alerts.
+fn objective_alerts(
+    objs: &[(f32, String, Option<String>, i32, Option<i32>)],
+) -> Vec<ObjectiveEvent> {
+    let mut avisos = Vec::new();
     for (t_s, m_type, sub, _kid, team_opt) in objs {
         let team = match team_opt {
             Some(100) => Team::Blue,
@@ -130,31 +174,16 @@ pub(crate) fn apply_lcu_enrichment(
         } else {
             "objetivo"
         };
-        cap.dominion.avisos.push(ObjectiveEvent {
+        avisos.push(ObjectiveEvent {
             team,
-            start_s: t_s,
-            end_s: t_s + 120.0,
+            start_s: *t_s,
+            end_s: *t_s + 120.0,
             dur_s: 120.0,
             puntos: 0.0,
             tipo: tipo.to_string(),
         });
     }
-
-    if set_duration {
-        cap.duration_s = dur;
-    }
-    cap.game_id = Some(game_id);
-    cap.dominion.fuente = "lcu_timeline_oro_real".to_string();
-    cap.dominion.vision = score::compute_vision(&cap.blocks, VisionThresholds::default());
-    cap.omisiones
-        .push(i18n::trf("Partida enlazada por r3dlog: gameId {0}", &[&game_id.to_string()]));
-    log_debug(&format!(
-        "enrich: breakpoints={}, vision_blocks={}, vision_alerts={}, avisos={}",
-        cap.dominion.breakpoints.len(),
-        cap.blocks.len(),
-        cap.dominion.vision.alerts.len(),
-        cap.dominion.avisos.len()
-    ));
+    avisos
 }
 
 /// `gameId` candidates for enrichment when a capture ends.

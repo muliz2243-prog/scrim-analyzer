@@ -101,53 +101,8 @@ pub(crate) fn kill_density_strip(ui: &mut egui::Ui, density: &[(u32, u32, u32)])
 }
 
 pub(crate) fn ui_replay(ui: &mut egui::Ui, r: &mut ReplayView) {
-    let m = &r.replay.metadata;
-    ui.add_space(8.0);
-    ui.label(RichText::new(i18n::tr("ANÁLISIS DE REPLAY .ROFL")).size(22.0).strong().color(ACCENT));
-    ui.label(RichText::new(basename(&r.path)).size(15.0).color(TEXT));
-    ui.label(
-        RichText::new(i18n::trf(
-            "Partida {0} · versión {1} · modo {2} · mapa {3} · cola {4} · {5}s",
-            &[
-                &m.game_id.to_string(),
-                &m.game_version,
-                &m.game_mode,
-                &m.map_id.to_string(),
-                &m.queue_id.to_string(),
-                &format!("{:.0}", m.game_length_s),
-            ],
-        ))
-        .size(13.5)
-        .color(MUTED),
-    );
-    if let Some(w) = &r.warning {
-        ui.add_space(8.0);
-        egui::Frame::default()
-            .fill(Color32::from_rgb(52, 22, 30))
-            .inner_margin(egui::Margin::same(10))
-            .corner_radius(egui::CornerRadius::same(6))
-            .stroke(egui::Stroke::new(1.0, RED.linear_multiply(0.5)))
-            .show(ui, |ui| {
-                ui.label(RichText::new(format!("⚠ {w}")).size(13.5).color(TEXT));
-            });
-    }
-    ui.add_space(10.0);
-
-    // Honest notice about what the format does not provide.
-    egui::Frame::default()
-        .fill(Color32::from_rgb(52, 40, 18))
-        .inner_margin(egui::Margin::same(10))
-        .corner_radius(egui::CornerRadius::same(6))
-        .show(ui, |ui| {
-            ui.label(RichText::new(i18n::tr("Aviso del formato replay")).size(15.0).strong().color(ACCENT_SOFT));
-            ui.label(
-                RichText::new(i18n::tr(
-                    "Esta vista es el análisis forense básico del .rofl (sin timeline del LCU). El .rofl moderno no expone la atribución de equipo en los eventos; por eso aquí NO hay oro ni visión por ventana. Para el informe completo, abre League of Legends y vuelve a abrir el replay: la app pedirá el timeline oficial por el gameId del nombre del archivo.",
-                ))
-                .size(14.0)
-                .color(TEXT),
-            );
-        });
+    replay_header(ui, r);
+    replay_format_notice(ui);
     ui.add_space(8.0);
 
     for w in &r.replay.warnings {
@@ -181,7 +136,66 @@ pub(crate) fn ui_replay(ui: &mut egui::Ui, r: &mut ReplayView) {
     kill_density_strip(ui, &r.density);
     ui.add_space(8.0);
 
-    let mut top: Vec<&(u32, u32, u32)> = r.density.iter().filter(|d| d.2 > 0).collect();
+    replay_density_top(ui, &r.density);
+    replay_events_report(ui, r.replay.events_report.as_ref());
+}
+
+/// Title, file name, metadata line and load warning.
+fn replay_header(ui: &mut egui::Ui, r: &ReplayView) {
+    let m = &r.replay.metadata;
+    ui.add_space(8.0);
+    ui.label(RichText::new(i18n::tr("ANÁLISIS DE REPLAY .ROFL")).size(22.0).strong().color(ACCENT));
+    ui.label(RichText::new(basename(&r.path)).size(15.0).color(TEXT));
+    ui.label(
+        RichText::new(i18n::trf(
+            "Partida {0} · versión {1} · modo {2} · mapa {3} · cola {4} · {5}s",
+            &[
+                &m.game_id.to_string(),
+                &m.game_version,
+                &m.game_mode,
+                &m.map_id.to_string(),
+                &m.queue_id.to_string(),
+                &format!("{:.0}", m.game_length_s),
+            ],
+        ))
+        .size(13.5)
+        .color(MUTED),
+    );
+    if let Some(w) = &r.warning {
+        ui.add_space(8.0);
+        egui::Frame::default()
+            .fill(Color32::from_rgb(52, 22, 30))
+            .inner_margin(egui::Margin::same(10))
+            .corner_radius(egui::CornerRadius::same(6))
+            .stroke(egui::Stroke::new(1.0, RED.linear_multiply(0.5)))
+            .show(ui, |ui| {
+                ui.label(RichText::new(format!("⚠ {w}")).size(13.5).color(TEXT));
+            });
+    }
+    ui.add_space(10.0);
+}
+
+/// Honest notice about what the format does not provide.
+fn replay_format_notice(ui: &mut egui::Ui) {
+    egui::Frame::default()
+        .fill(Color32::from_rgb(52, 40, 18))
+        .inner_margin(egui::Margin::same(10))
+        .corner_radius(egui::CornerRadius::same(6))
+        .show(ui, |ui| {
+            ui.label(RichText::new(i18n::tr("Aviso del formato replay")).size(15.0).strong().color(ACCENT_SOFT));
+            ui.label(
+                RichText::new(i18n::tr(
+                    "Esta vista es el análisis forense básico del .rofl (sin timeline del LCU). El .rofl moderno no expone la atribución de equipo en los eventos; por eso aquí NO hay oro ni visión por ventana. Para el informe completo, abre League of Legends y vuelve a abrir el replay: la app pedirá el timeline oficial por el gameId del nombre del archivo.",
+                ))
+                .size(14.0)
+                .color(TEXT),
+            );
+        });
+}
+
+/// Table of the 12 windows with more kills.
+fn replay_density_top(ui: &mut egui::Ui, density: &[(u32, u32, u32)]) {
+    let mut top: Vec<&(u32, u32, u32)> = density.iter().filter(|d| d.2 > 0).collect();
     top.sort_by(|a, b| b.2.cmp(&a.2).then(a.0.cmp(&b.0)));
     top.truncate(12);
     if top.is_empty() {
@@ -222,8 +236,11 @@ pub(crate) fn ui_replay(ui: &mut egui::Ui, r: &mut ReplayView) {
                 }
             });
     }
+}
 
-    if let Some(er) = &r.replay.events_report {
+/// Events of the replay checked against statsJson.
+fn replay_events_report(ui: &mut egui::Ui, er: Option<&rofl_analyzer::model::EventsReport>) {
+    if let Some(er) = er {
         ui.add_space(10.0);
         ui.label(
             RichText::new(i18n::trf(
