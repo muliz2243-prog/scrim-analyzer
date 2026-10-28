@@ -215,6 +215,17 @@ src/
   lib.rs      Public API (analyze_file / analyze_bytes / to_json)
   main.rs     CLI (.rofl analysis + live --scrim mode + --recalc)
   gui_main.rs Local graphical interface (`scrim-analyzer` binary, `gui` feature)
+  gui/        Interface modules: one file per screen or panel
+    theme.rs    Palette, typography, preferences and app visuals
+    state.rs    Shared types: messages, views and annotations
+    capture.rs  Background threads (live poller, replay, vision, LCU)
+    data.rs     Save/load captures and rebuild the report
+    charts.rs   Accumulated gold/vision charts and time bar
+    home.rs     Home screen
+    live.rs     Live dashboard
+    vision.rs   Vision dashboard and gold breakdown table
+    report.rs   Report screen
+    replay.rs   Replay screen
   header.rs   Legacy header: RIOT magic, offsets, footer
   metadata.rs Deserialization of the metadata JSON (serde)
   chunks.rs   Chunk table + zlib decompression (flate2)
