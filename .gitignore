@@ -13,6 +13,7 @@
 /capturas/
 debug.log
 config.json
+/token.txt
 *.rofl
 
 # Screenshot sources (only docs/screenshots is published)

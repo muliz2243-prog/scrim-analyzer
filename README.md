@@ -4,6 +4,17 @@
 
 No overlay, no injection, no telemetry. Everything is computed on your machine, and the UI is available in English (default), Spanish, French, German and Korean.
 
+[**Download for Windows**](https://github.com/muliz2243-prog/scrim-analyzer/releases/latest) · [Portable ZIP](https://github.com/muliz2243-prog/scrim-analyzer/releases/latest) · [Visual guide](docs/VISUAL_GUIDE.md)
+
+> Windows 10/11. League of Legends must be installed and the client open to fetch the official match timeline.
+
+## Quick start
+
+1. Download and run the installer (or unzip the portable build).
+2. Open League of Legends.
+3. Press **Detect live game** and give the review a name.
+4. Open the replay, set **8x** and wait for the report to appear.
+
 ![Home screen](docs/screenshots/01_home_save.png)
 
 ## What it shows
@@ -432,7 +443,11 @@ accounted for.
 
 ## Installing on another PC (installer)
 
-There is a compiled **installer** at `dist\ScrimAnalyzer-Setup-1.0.0.exe` (Inno Setup 6).
+Download the latest **installer** from the
+[releases page](https://github.com/muliz2243-prog/scrim-analyzer/releases/latest)
+(`ScrimAnalyzer-Setup-1.0.0.exe`, Inno Setup 6). A portable ZIP with the same
+binaries is published next to it. Both are listed in `SHA256SUMS.txt`.
+
 It installs per user, **without administrator permissions**, in
 `%LOCALAPPDATA%\Programs\ScrimAnalyzer` (with write permission for
 captures and notes), and creates shortcuts in the **Start menu** and on the
