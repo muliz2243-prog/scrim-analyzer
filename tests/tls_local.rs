@@ -92,9 +92,16 @@ fn cuenta_el_cambio_de_certificado() {
 
 /// The full live path (native HTTPS → parsing → events) with a real
 /// `allgamedata` capture.
+///
+/// The fixture is a real capture with the player names replaced by
+/// `Jugador NN#TEST`, so the test also runs on CI (a local, uncommitted
+/// `live_cap_a.json` used to be required, which made every run red).
 #[test]
 fn el_poller_ingiere_la_partida_por_https_nativo() {
-    let ruta = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("live_cap_a.json");
+    let ruta = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("live_cap_a.json");
     let cuerpo = std::fs::read_to_string(&ruta).expect("captura real de allgamedata");
     let (url, _h) = servidor_autofirmado(&cuerpo);
 

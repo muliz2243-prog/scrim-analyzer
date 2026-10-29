@@ -1,6 +1,6 @@
 # Scrim Analyzer
 
-**A free, local desktop app for reviewing League of Legends scrims**, written in Rust. It turns a replay into a post-game report: gold advantage in 30-second windows, vision every 2 minutes, objective markers, per-window alerts and the best/worst windows for each team.
+**A free, local desktop app for League of Legends scrim analysis**, written in Rust. It turns a replay (or live session) into a report with real gold advantage in 30-second windows, vision every 2 minutes, objective markers, per-window alerts and the best/worst windows for each team — using the official LCU timeline when available.
 
 No overlay, no injection, no telemetry. Everything is computed on your machine, and the UI is available in English (default), Spanish, French, German and Korean.
 
