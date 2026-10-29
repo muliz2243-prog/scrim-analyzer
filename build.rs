@@ -27,24 +27,26 @@ fn main() {
 
 #[cfg(windows)]
 fn incrustar_recurso() -> Result<(), String> {
-    // Space-free working directory (the project path may contain spaces and
-    // windres breaks on them in the -I flag).
-    let tmp = std::env::temp_dir().join("scrim-analyzer-build");
-    std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
-    let ico = tmp.join("app.ico");
-    std::fs::copy("assets/scrim-analyzer.ico", &ico).map_err(|e| e.to_string())?;
+    // Working directory for `windres`: it lives inside the project, which may
+    // contain spaces (`...\Nueva carpeta\...`), but the `.rc` and the `.ico` are
+    // referenced by **relative** name, so no `-I` flag with spaces is ever
+    // passed (that was the original reason for the temporary copy in %TEMP%).
+    let out = std::env::var("OUT_DIR").map_err(|e| format!("OUT_DIR: {e}"))?;
+    let dir = std::path::Path::new(&out);
+    let ico = dir.join("app.ico");
+    std::fs::write(&ico, std::fs::read("assets/scrim-analyzer.ico").map_err(|e| format!("read icon: {e}"))?)
+        .map_err(|e| format!("write icon: {e}"))?;
 
     // .rc with version information (ASCII) + the icon.
-    let rc = tmp.join("app.rc");
-    std::fs::write(&rc, version_rc()).map_err(|e| e.to_string())?;
+    let rc = dir.join("app.rc");
+    std::fs::write(&rc, version_rc()).map_err(|e| format!("write rc: {e}"))?;
 
-    // windres: .rc → .o
-    let obj = tmp.join("app.o");
+    // windres: .rc → .o (relative paths, cwd = OUT_DIR).
+    let obj = dir.join("app.o");
     let salida = Command::new("windres")
-        .current_dir(&tmp)
-        .arg(format!("-I{}", tmp.display()))
-        .arg(&rc)
-        .arg(&obj)
+        .current_dir(dir)
+        .arg("app.rc")
+        .arg("app.o")
         .status()
         .map_err(|e| format!("windres: {e}"))?;
     if !salida.success() {
@@ -63,11 +65,11 @@ fn incrustar_recurso() -> Result<(), String> {
 fn version_rc() -> String {
     let campos = [
         ("ProductName", "Scrim Analyzer"),
-        ("FileDescription", "Scrim Analyzer - live scrim score and vision"),
+        ("FileDescription", "Scrim Analyzer - real gold and vision"),
         ("CompanyName", "Scrim Analyzer"),
         ("LegalCopyright", "Copyright (C) 2026 Scrim Analyzer"),
-        ("ProductVersion", "1.0.0.0"),
-        ("FileVersion", "1.0.0.0"),
+        ("ProductVersion", "1.0.1.0"),
+        ("FileVersion", "1.0.1.0"),
         ("InternalName", "scrim-analyzer"),
         ("OriginalFilename", "scrim-analyzer.exe"),
     ];

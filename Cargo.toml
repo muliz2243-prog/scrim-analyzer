@@ -1,6 +1,6 @@
 [package]
 name = "rofl-analyzer"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 description = "Live League of Legends scrim analyzer: real gold per 30-second window and vision"
 license = "MIT"

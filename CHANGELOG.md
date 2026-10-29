@@ -2,6 +2,21 @@
 
 All notable changes to Scrim Analyzer are documented here.
 
+## [1.0.1] — 2026-10-28
+
+Rebuilt from the current `main`. No behavior changes: this release only
+publishes the binaries of the refactored code base and the updated docs.
+
+### Changed
+
+- The GUI is split into one module per screen and panel (`src/gui/`); the
+  code was moved verbatim, so the behavior is identical.
+- The README describes the metric as **real gold** from the official LCU
+  timeline, and the reverse-engineering detail moved to
+  [`docs/REVERSE_ENGINEERING.md`](docs/REVERSE_ENGINEERING.md).
+- The live-path test now runs against a sanitized `allgamedata` fixture, so it
+  also runs on CI instead of depending on a local, uncommitted capture.
+
 ## [1.0.0] — 2026-10-27
 
 First public release.

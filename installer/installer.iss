@@ -6,7 +6,7 @@
 ; ---------------------------------------------------------------------------
 
 #define AppName        "Scrim Analyzer"
-#define AppVersion     "1.0.0"
+#define AppVersion     "1.0.1"
 #define AppPublisher   "Scrim Analyzer"
 #define AppExe         "scrim-analyzer.exe"
 #define AppCli         "rofl-analyzer.exe"
